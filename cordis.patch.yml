@@ -1,0 +1,11 @@
+# The dsh-reasoning-level bundle patch: unified default reasoning level for
+# all models. Applied as a layer when installed via `dsh plugin add`.
+#
+# One dual-face host row: registers the `llm-reasoning` settings namespace,
+# applies per-route/model default levels dynamically, injects per-model
+# defaults at `agent/request`, collects live call stats at `llm/stream`, and
+# serves the Settings -> 统一推理等级 page through the package's `./client`
+# entry (dsh.client in package.json).
+- insert:
+    - id: reasoning-level
+      name: dsh-reasoning-level
