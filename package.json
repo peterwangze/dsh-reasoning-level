@@ -1,9 +1,12 @@
 {
   "name": "dsh-reasoning-level",
   "description": "DeepSeek Harness 统一推理等级插件：一个 llm-reasoning 设置项动态配置 DSH 所有模型的默认推理等级（思考等级）——自动为手写声明的模型补齐推理能力、按路由设置默认等级（仅当全部模型支持）、同步 DeepSeek 官方路由，改设置即生效。",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
@@ -30,14 +33,14 @@
     "cordis.patch.yml",
     "install.ps1",
     "install.sh",
+    "VERIFICATION.md",
     "README.md"
   ],
-  "dependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "@deepseek-ai/dsh-settings": "^0.1.0-rc.7"
-  },
+  "dependencies": {},
   "peerDependencies": {
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6"
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-settings": "*",
+    "@deepseek-ai/dsh-llm": "*"
   }
 }

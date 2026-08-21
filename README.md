@@ -2,7 +2,7 @@
 
 > DeepSeek Harness（DSH）统一推理等级插件：**一个设置项，动态管理所有模型的默认思考强度**——含模型级默认与实时调用观测。
 
-[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.5.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
+[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.6.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
 
 ---
 
@@ -37,6 +37,7 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 - **实测按钮**（v0.4.0）：统计面板发 1-token 请求验证某模型某等级实际可用，网关拒绝自动入黑名单
 - **CSV 导出 + 建议列**（v0.4.0）：统计一键导出 CSV；聚合表显示错误率/实测拒绝建议
 - **i18n 基础**（v0.5.0）：client 接入 locale（zh/en 标题与区块）
+- **事故加固**（v0.6.0，[VERIFICATION.md](./VERIFICATION.md)）：`dependencies` 清零、宿主包全 peer（`*`）对齐 DSH out-of-tree 官方契约；安装全面改走 `dsh plugin` 通道（不再 junction 共享树/手改 patch/写 settings）；全部注册与钩子失败就地降级，绝不允许升级为 DSH 启动失败；修复设置页统计面板 `t is not defined` 渲染崩溃；新增渲染冒烟测试与依赖策略 CI 门禁
 - 实时调用统计：环形缓冲 300 条 + 按模型聚合（等级分布 / 思考 tokens / 错误数），设置页 2s 刷新
 - 改设置即生效：适配器每次请求重读设置，无需重启
 - 兼容官方安装通道：`dsh plugin add / update / remove`（`dsh.bundle.patch` bundle 层声明）
@@ -63,25 +64,35 @@ dsh plugin --profile web add link:/path/to/dsh-reasoning-level
 
 > `file:` 规格是 pnpm 的内容寻址快照，源码更新后需 `remove` 再 `add` 刷新；`link:` 是符号链接直连源码，无此问题。
 
-### 方式二：离线一键脚本（无 pnpm / 内网环境备选）
+### 方式二：离线一键脚本（解压发行包后使用）
 
-**Windows（PowerShell 5.1+）**——在线一行：
+**Windows（PowerShell 5.1+）**：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iex (((irm https://raw.githubusercontent.com/peterwangze/dsh-reasoning-level/main/install.ps1) -join [Environment]::NewLine).TrimStart([char]0xFEFF))"
+.\install.ps1              # 安装本目录（file: 快照）
+.\install.ps1 -Link        # 开发模式（link: 直连源码，改代码重启即生效）
+.\install.ps1 -Uninstall   # 卸载
 ```
 
-离线（解压发行包后在包目录内）：`.\install.ps1 -LocalPath .`
-
-**macOS / Linux / Git Bash**——在线一行：
+**macOS / Linux / Git Bash**：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/peterwangze/dsh-reasoning-level/main/install.sh | sh
+./install.sh               # 安装本目录
+./install.sh --link        # 开发模式
+./install.sh --uninstall   # 卸载
 ```
 
-离线：`./install.sh --local .`
+脚本做三件事：①安全清除旧版（v0.2–v0.5）junction 残留（只删链接本体，绝不递归删真实目录）；②安装前自检依赖策略（`dependencies` 必须为空）；③调用官方 `dsh plugin --profile <P> add <本目录>` 通道完成安装。参数：`-Profile/--profile`（默认 `web`）、`DSH_HOME` 环境变量。
 
-脚本幂等可重复执行：接入 `profiles/node_modules`（junction/符号链接优先，失败回退拷贝）→ 在 profile `cordis.patch.yml` 插入组合行 → `settings.yaml` 无 `llm-reasoning` 节时写入默认配置。参数：`-Profile/--profile`（默认 `web`）、`-RepoUrl/--repo`、`-Ref/--ref`、`DSH_HOME` 环境变量。
+> v0.6.0 起**不再支持**也**绝不应该**用任何手段把插件直接链接进
+> `profiles/node_modules` 或手改 `cordis.patch.yml`——旧脚本的 junction 方案
+> 曾造成 DSH 无法启动与消息发送失败级事故，详见 [VERIFICATION.md](./VERIFICATION.md)。
+
+### 安装后验证（强烈建议）
+
+按 [VERIFICATION.md](./VERIFICATION.md) 第 3 节执行：层 0 静态门禁（CI 已含）→
+层 1 金丝雀 profile 四步冒烟（发消息 / 设置页 / 统计端点 / 等级切换）→
+层 2 工作 profile 上线与回滚。**升级 DSH 后请先跑金丝雀再重启工作 profile。**
 
 ## 使用指导
 
@@ -141,9 +152,9 @@ llm-reasoning:
 
 ```sh
 dsh plugin --profile web remove dsh-reasoning-level    # 方式一
+# 或（含旧版残留清理）：
+# Windows: .\install.ps1 -Uninstall      macOS/Linux: ./install.sh --uninstall
 ```
-
-或离线脚本安装的：删除 profile `cordis.patch.yml` 中的 `reasoning-level` 行 + 删除 `profiles/node_modules/dsh-reasoning-level`。
 
 可选清理：把 `llm-reasoning.enabled` 改为 `false` 重启一次（还原插件写入的字段），然后删除 `settings.yaml` 的 `llm-reasoning` 节。
 
@@ -154,7 +165,7 @@ dsh plugin --profile web remove dsh-reasoning-level    # 方式一
 - **统计**：`llm/stream` waterfall 只读旁路（采集 usage/finish chunk）；`webServer` 暴露 `/reasoning-level-stats` 供设置页轮询；
 - **设置页**：`settings.section` 槽位；读写走标准 wire 面（`api.settings.describe/update/mutate`、`api.llm.models` 能力探测）。
 
-依赖：宿主 base 组合的 `settings` / `llm` / `llm-pi-ai` / `llm-deepseek`（后两者缺席时自动跳过对应部分）；浏览器侧为 web profile 默认组合。
+依赖契约（v0.6.0）：`dependencies` 恒为空；`@deepseek-ai/*` 全部为 `peerDependencies`（`*`），由 DSH 维护的 `profiles/node_modules` 平坦回退树解析（dsh-app-boot 的 out-of-tree 官方契约）。宿主 base 组合的 `settings` / `llm` 必需，`llm-pi-ai` / `llm-deepseek` 缺席时自动跳过对应部分；浏览器侧为 web profile 默认组合。
 
 ## License
 

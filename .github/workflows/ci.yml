@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate package.json and JS syntax
+        run: |
+          node -e "const p=require('./package.json'); if(!p.name||!p.main||!p.dsh||!p.dsh.bundle) { throw new Error('package.json missing dsh.bundle/main/name'); } if(!p.dsh.client) { throw new Error('missing dsh.client'); } console.log('package.json OK:', p.name, p.version)"
+          node --check lib/index.js
+          node --check lib/client.js
+      - name: Dependency policy (out-of-tree plugin contract)
+        run: |
+          node -e "
+          const p = require('./package.json');
+          const deps = Object.keys(p.dependencies ?? {});
+          if (deps.length !== 0) {
+            throw new Error('dependencies must be empty (host packages belong in peerDependencies, resolved via the profiles flat fallback tree). Found: ' + deps.join(', '));
+          }
+          const peers = Object.keys(p.peerDependencies ?? {});
+          if (peers.length === 0) throw new Error('peerDependencies must not be empty');
+          for (const [name, spec] of Object.entries(p.peerDependencies ?? {})) {
+            if (spec !== '*') throw new Error('peer ' + name + ' must use * (never pin host runtime versions): ' + spec);
+          }
+          console.log('dependency policy OK — peers:', peers.join(', '));
+          "
+      - name: Client render smoke (loading + loaded paths)
+        run: node scripts/client-smoke.mjs
+      - name: Validate bundle patch and install scripts present
+        run: |
+          test -f cordis.patch.yml || { echo "missing cordis.patch.yml"; exit 1; }
+          test -f install.ps1 || { echo "missing install.ps1"; exit 1; }
+          test -f install.sh || { echo "missing install.sh"; exit 1; }
+          test -f VERIFICATION.md || { echo "missing VERIFICATION.md"; exit 1; }
+          echo "bundle assets OK"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package release artifact
+        run: |
+          mkdir -p dist
+          tar --exclude=.git --exclude=node_modules -czf dist/dsh-reasoning-level-${GITHUB_REF_NAME}.tar.gz .
+          sha256sum dist/dsh-reasoning-level-${GITHUB_REF_NAME}.tar.gz > dist/SHA256SUMS.txt
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
