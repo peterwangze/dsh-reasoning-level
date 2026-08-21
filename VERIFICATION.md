@@ -95,9 +95,17 @@
 金丝雀原则：**绝不让未验证的插件行出现在工作 profile 的组合里**。
 用一次性 profile 试验，失败最坏损失 = 删一个目录。
 
+> **金丝雀实战记录（2026-08，本轮安装时抓到的第四个坑）**：pnpm 会把
+> 裸目录安装规格归一化为 `link:`。`link:` 下 Node 从**源码真实路径**
+> 向上解析依赖，永远够不到 `$DSH_HOME/profiles/node_modules` 平坦回退树
+> → 插件导入宿主包 peers 全部 `ERR_MODULE_NOT_FOUND` → **整机启动失败**
+> （又是"拉不起"级症状，换了个马甲）。结论：安装规格必须显式 `file:`
+> （快照）；`link:` 仅供源码目录自带完整 node_modules 的开发场景。
+> 本仓库安装器已强制 `file:`，CI 无法覆盖此项——**只有金丝雀能拦住**。
+
 ```powershell
-# 1) 金丝雀安装（一次性 profile，绝不碰 web）
-dsh plugin --profile canary add D:/AI/agent/deepseek/plugins/thinking/dsh-reasoning-level
+# 1) 金丝雀安装（一次性 profile，绝不碰 web；必须显式 file: ——见下方实战记录）
+dsh plugin --profile canary add file:D:/AI/agent/deepseek/plugins/thinking/dsh-reasoning-level
 
 # 2) 金丝雀启动 + 探活（DSH_HOME 隔离到临时目录更彻底）
 $env:DSH_CANARY = "$env:TEMP\dsh-canary"
@@ -124,7 +132,7 @@ Copy-Item "$env:USERPROFILE\.dsh\profiles\web\pnpm-lock.yaml" "$env:TEMP\web.loc
 Copy-Item "$env:USERPROFILE\.dsh\profiles\web\cordis.patch.yml" "$env:TEMP\web.patch.bak"
 
 # 1) 安装 + 重启 DSH，重复层 1 的第 3 步冒烟
-dsh plugin --profile web add D:/AI/agent/deepseek/plugins/thinking/dsh-reasoning-level
+dsh plugin --profile web add file:D:/AI/agent/deepseek/plugins/thinking/dsh-reasoning-level
 
 # 2) 回滚（任一冒烟失败时）
 dsh plugin --profile web remove dsh-reasoning-level

@@ -89,7 +89,12 @@ DEP_COUNT=$(node -e "const p=require('$SRC/package.json'); console.log(Object.ke
 node -e "const p=require('$SRC/package.json'); if(!p.dsh?.bundle?.patch) process.exit(1)" \
   || fail "package.json 缺 dsh.bundle.patch 声明——dsh 无法把它识别为 profile 层。"
 
-SPEC="$SRC"
+# 规格说明（金丝雀实测，2026-08）：pnpm 会把裸目录规格归一化为 link:，
+# 而 link: 安装下 Node 从源码真实路径向上解析依赖，永远够不到
+# $DSH_HOME/profiles/node_modules 平坦回退树 → 宿主包 peers 全部
+# ERR_MODULE_NOT_FOUND。必须显式 file:（内容寻址快照）。link: 仅当
+# 源码目录自带完整 node_modules 时可用。
+SPEC="file:$SRC"
 [ "$MODE" = "link" ] && SPEC="link:$SRC"
 step "安装：dsh plugin --profile $PROFILE add $SPEC"
 dsh plugin --profile "$PROFILE" add "$SPEC"

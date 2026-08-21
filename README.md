@@ -62,7 +62,11 @@ dsh plugin --profile web remove dsh-reasoning-level              # 卸载
 dsh plugin --profile web add link:/path/to/dsh-reasoning-level
 ```
 
-> `file:` 规格是 pnpm 的内容寻址快照，源码更新后需 `remove` 再 `add` 刷新；`link:` 是符号链接直连源码，无此问题。
+> `file:` 规格是 pnpm 的内容寻址快照，源码更新后需 `remove` 再 `add` 刷新；
+> `link:` 是符号链接直连源码，无此问题——但 **`link:` 要求源码目录自带完整
+> node_modules**（能解析全部宿主包 peers），否则插件加载即
+> `ERR_MODULE_NOT_FOUND`（DSH 的 peers 回退树只从 profile 物化目录可达，
+> 不从源码真实路径可达）。普通安装一律用 `file:`。
 
 ### 方式二：离线一键脚本（解压发行包后使用）
 

@@ -108,7 +108,12 @@ if (-not $pkg.dsh.bundle.patch) {
   Write-Fail "package.json 缺 dsh.bundle.patch 声明——dsh 无法把它识别为 profile 层。"
 }
 
-$spec = if ($Link) { "link:$src" } else { $src }
+# 规格说明（金丝雀实测，2026-08）：pnpm 会把裸目录规格归一化为 link:，
+# 而 link: 安装下 Node 从源码真实路径向上解析依赖，永远够不到
+# $DSH_HOME/profiles/node_modules 平坦回退树 → 宿主包 peers 全部
+# ERR_MODULE_NOT_FOUND。必须显式 file:（内容寻址快照，物化在 profile
+# 的 node_modules 下）。link: 仅当源码目录自带完整 node_modules 时可用。
+$spec = if ($Link) { "link:$src" } else { "file:$src" }
 Write-Step "安装：dsh plugin --profile $Profile add $spec"
 dsh plugin --profile $Profile add $spec
 if ($LASTEXITCODE -ne 0) {
