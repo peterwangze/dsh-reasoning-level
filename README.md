@@ -26,6 +26,11 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 - 路由级默认等级（该路由全部模型支持时才写入）
 - DeepSeek 官方路由同步（`llm-deepseek.reasoningEffort`，取 off/low/high/max）
 - 模型级默认：`models: {"provider/model": level}`，界面按模型实测能力过滤可选项、探测结果标注、独立删除按钮
+- **全路径注入**（v0.3.0）：模型级默认不只对 agent-loop 会话生效——router 子代理 / session-title / compaction 等手建调用同样注入（`llm/stream` 未冻结请求注入）
+- **自愈降级**（v0.3.0）：网关实测拒绝某等级（`UNSUPPORTED_REASONING_EFFORT`）自动记入黑名单，后续注入跳过，设置页明示
+- **统计增强**（v0.3.0）：每次调用耗时、流内思考字符近似（网关不回报 reasoning_tokens 时仍可观测思考量）、来源（sessionId/purpose）
+- **同步默认 agent 模型**（v0.3.0）：`syncDefaultAgent` 开启时全局等级变化同步写 `agent-default-model.reasoningEffort`
+- **统计持久化**（v0.3.0）：聚合数据落盘 `$DSH_HOME/storages/reasoning-level-stats.json`，重启后恢复
 - 实时调用统计：环形缓冲 300 条 + 按模型聚合（等级分布 / 思考 tokens / 错误数），设置页 2s 刷新
 - 改设置即生效：适配器每次请求重读设置，无需重启
 - 兼容官方安装通道：`dsh plugin add / update / remove`（`dsh.bundle.patch` bundle 层声明）
