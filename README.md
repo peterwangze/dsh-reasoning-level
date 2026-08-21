@@ -2,7 +2,7 @@
 
 > DeepSeek Harness（DSH）统一推理等级插件：**一个设置项，动态管理所有模型的默认思考强度**——含模型级默认与实时调用观测。
 
-[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.2.4-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
+[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.5.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
 
 ---
 
@@ -31,6 +31,12 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 - **统计增强**（v0.3.0）：每次调用耗时、流内思考字符近似（网关不回报 reasoning_tokens 时仍可观测思考量）、来源（sessionId/purpose）
 - **同步默认 agent 模型**（v0.3.0）：`syncDefaultAgent` 开启时全局等级变化同步写 `agent-default-model.reasoningEffort`
 - **统计持久化**（v0.3.0）：聚合数据落盘 `$DSH_HOME/storages/reasoning-level-stats.json`，重启后恢复
+- **端点访问控制**（v0.4.0）：统计端点默认仅回环 Host 可读；LAN 部署需显式 `statsPublic: true`
+- **off 线值按协议细化**（v0.4.0）：zai/deepseek thinking 格式下 off 显式发送 `disabled`（默认开启思考的模型真正关闭），openai 系缺省
+- **purpose 级默认**（v0.4.0）：`purposes.compaction` / `purposes.session-title` 独立等级（辅助调用可用 off 省 token）
+- **实测按钮**（v0.4.0）：统计面板发 1-token 请求验证某模型某等级实际可用，网关拒绝自动入黑名单
+- **CSV 导出 + 建议列**（v0.4.0）：统计一键导出 CSV；聚合表显示错误率/实测拒绝建议
+- **i18n 基础**（v0.5.0）：client 接入 locale（zh/en 标题与区块）
 - 实时调用统计：环形缓冲 300 条 + 按模型聚合（等级分布 / 思考 tokens / 错误数），设置页 2s 刷新
 - 改设置即生效：适配器每次请求重读设置，无需重启
 - 兼容官方安装通道：`dsh plugin add / update / remove`（`dsh.bundle.patch` bundle 层声明）
@@ -110,10 +116,15 @@ curl -fsSL https://raw.githubusercontent.com/peterwangze/dsh-reasoning-level/mai
 
 ```yaml
 llm-reasoning:
-  enabled: true   # false = 撤销本插件写入的全部默认（能力声明与路由默认一并还原）
-  level: high     # 全局默认
-  models:         # 模型级默认（键 "provider/model"）
+  enabled: true       # false = 撤销本插件写入的全部默认（能力声明与路由默认一并还原）
+  level: high         # 全局默认
+  models:             # 模型级默认（键 "provider/model"）
     "zai-coding-cn/GLM-5.3": max
+  purposes:           # 辅助调用独立等级（可选）
+    compaction: off
+    session-title: off
+  syncDefaultAgent: false  # true = 全局等级变化同步 agent-default-model.reasoningEffort
+  statsPublic: false       # true = 统计端点允许 LAN 访问（默认仅回环）
 ```
 
 插件运行时自动维护：`llm-pi-ai.providers.<route>.models[].reasoningEfforts`（能力声明，含旧版自动升级）、`llm-pi-ai.providers.<route>.reasoning`（路由默认）、`llm-deepseek.reasoningEffort`。
