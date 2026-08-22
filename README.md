@@ -148,6 +148,8 @@ llm-reasoning:
   probeEfforts: {}         # provider/model -> 实测能力声明（不被生成表升级覆盖）
 ```
 
+> ⚠️ **安全警示（v0.7.0）**：`statsPublic: true` 时统计端点允许 LAN 访问，**新增的 `/reasoning-level-stats/probe` 与 `/reasoning-level-stats/probe/apply` 端点随之开放**——LAN 内任何设备无需认证即可触发 1-token 实测请求（产生 LLM 成本），并可写入模型能力声明与 `probeBlacklist`/`probeEfforts` 配置。默认请保持回环（`statsPublic: false`）；确需 LAN 暴露时请先在可信网络中评估风险。
+
 插件运行时自动维护：`llm-pi-ai.providers.<route>.models[].reasoningEfforts`（能力声明，含旧版自动升级）、`llm-pi-ai.providers.<route>.reasoning`（路由默认）、`llm-deepseek.reasoningEffort`。
 
 ### 5. 验证生效（观测方法）
