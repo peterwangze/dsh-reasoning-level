@@ -5,7 +5,7 @@
     "DEV-001": {
       "task_id": "DEV-001",
       "priority": "P0",
-      "status": "⏳ 进行中（2026-08-23 接入后立即执行）",
+      "status": "✅ 完成 (2026-08-23)——验收 DEV-001 acceptance PASS",
       "goal": "落地用户提供的 7 条开发原则 + 4 条编程要求：创建 docs/development-principles.md、在 AGENTS.md 末尾追加『项目开发原则』段、在 plan-tracker 项目配置建立引用（三项均为治理记录/平台入口文件，无产品代码改动）",
       "product_success_contract": {
         "user": "项目现在及未来的维护者与全部任务执行者（开发/审查/验证代理与人工审查人），以及遵循这些原则开展开发的人",
@@ -139,8 +139,8 @@
     "DEV-002": {
       "task_id": "DEV-002",
       "priority": "P1",
-      "status": "⏳ 待启动（DEV-001 完成后接续）",
-      "goal": "把 v0.7.0 工作区既有的 5 文件未提交变更整理为按功能分组的提交（README.md/VERIFICATION.md/lib/client.js/lib/index.js/package.json），遵循『一个 commit 一个问题』原则并跑通既有 CI 等价门禁（语法检查 + client-smoke + 依赖策略）",
+      "status": "✅ 完成 (2026-08-23)——R1 APPROVED_WITH_NOTES unresolved_blockers=0，node --test 8/8 pass",
+      "goal": "把 v0.7.0 工作区既有的 5 文件未提交变更整理为按功能分组的提交（README.md/VERIFICATION.md/lib/client.js/lib/index.js/package.json），遵循『一个 commit 一个问题』原则并跑通既有 CI 等价门禁（语法检查 + client-smoke + 依赖策略）——已完成：2 分组提交 + R0 NEEDS_CHANGE 返工 5 提交（F1~F8）+ R1 复审通过",
       "product_success_contract": {
         "user": "通过 dsh plugin update 获取 v0.7.0 的用户，以及仓库维护者/审查者",
         "job_to_be_done": "把已完成的 v0.7.0 功能变更以可审查、可回溯、单一关注点的提交落地，为发布做好准备",
@@ -166,9 +166,9 @@
         "command": "node scripts/client-smoke.mjs",
         "expected_output": "client smoke 无异常输出且 exit 0（另执行 node --check lib/index.js 与 lib/client.js）",
         "last_run": {
-          "status": "not_run_yet",
-          "exit_code": null,
-          "summary": "2026-08-23 待启动：DEV-002 执行时运行冒烟与语法检查并回写本字段，输出记入 evidence-log"
+          "status": "PASS",
+          "exit_code": 0,
+          "summary": "2026-08-23 返工后全量验证：node --check lib/index.js 与 lib/client.js exit 0；node scripts/client-smoke.mjs 输出 client-smoke: OK — 4 components rendered；node --test 8 pass / 0 fail（6 断言+2 基建）。证据见 evidence-log EVD-005 与 REVIEW-DEV-002-R1（APPROVED_WITH_NOTES unresolved_blockers=0）"
         },
         "demo_evidence": "DEV-002 执行时运行 node scripts/client-smoke.mjs 的输出记入 evidence-log"
       },
@@ -248,11 +248,10 @@
         "interruption_budget": "每个工作单元最多打断用户一次，除非出现新的关键触发"
       },
       "allowed_change_scope": [
-        "README.md（按既有 diff 提交，不额外改写内容）",
-        "VERIFICATION.md（按既有 diff 提交）",
-        "lib/client.js（按既有 diff 提交）",
-        "lib/index.js（按既有 diff 提交）",
-        "package.json（按既有 diff 提交，不动 dependencies/peers 语义）",
+        "README.md（R0 返工：F6 statsPublic 安全警示段落）",
+        "lib/index.js（R0 返工：F1 probeEfforts schema 放宽 + F2 台账顺序）",
+        "lib/client.js（R0 返工：F3 i18n 引用 + F4 恒等分支/失败色/行 key + F5 AbortController 超时 + F10 注释核实修正）",
+        "test/（R0 返工新建：F8 node:test 最小回归用例）",
         ".governance/plan-tracker.md（DEV-002 状态与证据引用）",
         ".governance/evidence-log.md（DEV-002 证据行）"
       ],
@@ -277,7 +276,7 @@
     "DEV-003": {
       "task_id": "DEV-003",
       "priority": "P1",
-      "status": "⏳ 待启动（DEV-001 完成后接续）",
+      "status": "⏳ 待实施（未开始——唯一活跃任务，R1 遗留项为输入）",
       "goal": "评估当前无单元测试的回归风险并补齐最小回归防护：为 lib/ 核心决策路径补充最小单元测试（node:test 或等价，零新依赖）或输出明确的评估结论（QA 参与，测试设计后触发 Test Reviewer）",
       "product_success_contract": {
         "user": "仓库维护者/发布者，以及通过 dsh plugin 安装插件、在版本升级后遇到行为回归的用户",

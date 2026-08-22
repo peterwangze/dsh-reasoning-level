@@ -40,7 +40,7 @@
 
 | 项目 | 当前阶段 | 总任务数 | 已完成 | 阻塞中 | 关键风险数 | 最近 Gate 结论 | 最近复盘日期 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| dsh-reasoning-level | 开发实现（v0.7.0 开发中） | 3 | 1 | 0 | 1 | 无（接入中） | — |
+| dsh-reasoning-level | 开发实现（v0.7.0 开发中） | 3 | 2 | 0 | 1 | 无（G6 待评估） | — |
 
 ## 当前活跃事项
 
@@ -49,8 +49,8 @@
 | 优先级 | ID | 事项 | 依赖 | 目标版本 | 闭环路径 | 状态 |
 |--------|----|------|------|---------|---------|------|
 | **P0** | DEV-001 | 落地项目开发原则与编程要求（7 原则 + 4 编程要求：AGENTS.md 注入 + docs/development-principles.md + plan-tracker 项目配置引用） | — | 0.7.0 | 治理记录范畴（docs/** 与 .governance/** 为治理记录，Coordinator 直写，审查状态=不需审查） | ✅ 完成 (2026-08-23)——三产物落地（docs/development-principles.md 新建 + AGENTS.md『项目开发原则』段追加 + plan-tracker 项目配置引用），验收命令输出 DEV-001 acceptance PASS（EVD-004） |
-| **P1** | DEV-002 | v0.7.0 工作区未提交变更整理与提交（README.md/VERIFICATION.md/lib/client.js/lib/index.js/package.json 共 5 文件）——提交需遵循"一个 commit 一个问题"原则（见开发原则 编程要求 4） | DEV-001 | 0.7.0 | 治理记录 + 产品代码（含产品代码 commit 按变更分组；M7.4 提交任务） | ⏳ 待实施（未开始——DEV-001 完成后接续） |
-| **P1** | DEV-003 | 测试防护网评估——当前无单元测试目录/文件，仅 scripts/client-smoke.mjs 冒烟脚本；评估并补齐最小回归防护（对应开发原则 4/6） | DEV-001 | 0.7.0 | 待评估后定（QA 参与；测试设计后自动触发 Test Reviewer） | ⏳ 待实施（未开始——DEV-001 完成后接续） |
+| **P1** | DEV-002 | v0.7.0 工作区未提交变更整理与提交（README.md/VERIFICATION.md/lib/client.js/lib/index.js/package.json 共 5 文件）——提交需遵循"一个 commit 一个问题"原则（见开发原则 编程要求 4） | DEV-001 | 0.7.0 | 治理记录 + 产品代码（含产品代码 commit 按变更分组；M7.4 提交任务） | ✅ 完成 (2026-08-23)——7 提交（c157085+33a071e 分组、4107cb3/a15d26a/6d730e1/441d9b4/e3a21d1 返工）；审查=已审查（R0 NEEDS_CHANGE→返工→R1 APPROVED_WITH_NOTES unresolved_blockers=0，EVD-005 + REVIEW-DEV-002-R0/R1）；验证 node --check×2/client-smoke/node --test 8/8 全 exit 0 |
+| **P1** | DEV-003 | 测试防护网评估——当前仅 test/ 最小回归（DEV-002 已建 6 断言）+ client-smoke 冒烟；评估补齐回归防护并决定 CI 接入（对应开发原则 4/6） | DEV-001 | 0.7.0 | 待评估后定（QA 参与；测试设计后自动触发 Test Reviewer）。**R1 复审遗留输入（REVIEW-DEV-002-R1 §6）**：N1 客户端超时对齐（40s<60s 漏判慢模型）、N2 probeSummaryOk 重置、N4 双引擎 schema 写法、T2 resolve-fallback $DSH_HOME、T3 node --test 接入 CI（需先解决 CI 依赖供给）、F7/F9/F11/F12 与测试覆盖缺口（403 门控/err 分支/30s abort）——启动时由用户圈定范围 | ⏳ 待实施（DEV-002 完成后为唯一活跃任务） |
 
 ### 最近完成
 
@@ -59,6 +59,7 @@
 | 任务 ID | 描述 | 完成日期 | 证据 |
 | --- | --- | --- | --- |
 | DEV-001 | 落地项目开发原则与编程要求（AGENTS.md + docs/development-principles.md + plan-tracker 引用） | 2026-08-23 | EVD-004 |
+| DEV-002 | v0.7.0 变更分组提交 + R0→R1 审查闭环（NEEDS_CHANGE→返工→APPROVED_WITH_NOTES unresolved_blockers=0） | 2026-08-23 | EVD-005 + REVIEW-DEV-002-R0/R1 |
 
 ## 版本规划
 
