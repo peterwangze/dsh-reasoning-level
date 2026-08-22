@@ -1,0 +1,413 @@
+{
+  "version": 1,
+  "generated_at": "2026-08-23T00:40:00",
+  "packets": {
+    "DEV-001": {
+      "task_id": "DEV-001",
+      "priority": "P0",
+      "status": "⏳ 进行中（2026-08-23 接入后立即执行）",
+      "goal": "落地用户提供的 7 条开发原则 + 4 条编程要求：创建 docs/development-principles.md、在 AGENTS.md 末尾追加『项目开发原则』段、在 plan-tracker 项目配置建立引用（三项均为治理记录/平台入口文件，无产品代码改动）",
+      "product_success_contract": {
+        "user": "项目现在及未来的维护者与全部任务执行者（开发/审查/验证代理与人工审查人），以及遵循这些原则开展开发的人",
+        "job_to_be_done": "未来一切开发、修复、审查与验收工作都以事实为依据、考虑全面影响、带测试防护、保证泛化与质量，不引入架构腐化、上帝模块或冗余修改",
+        "non_goals": [
+          "不修改 lib/、scripts/、package.json、README.md、VERIFICATION.md、.github/workflows 等产品代码",
+          "不发布 v0.7.0（发布属后续任务）",
+          "不把原则编码进 CI/校验器（列为未来评估项）"
+        ],
+        "success_metrics": [
+          "docs/development-principles.md 存在于仓库根且包含用户提供的全部 7+4 条原文（逐条核对）",
+          "AGENTS.md 末尾存在『项目开发原则』段——DSH 会话自动注入，用户下次会话即感知原则约束",
+          "验收命令 python -c 断言三处产物存在并输出 DEV-001 acceptance PASS（exit 0）"
+        ],
+        "competitive_baseline": "治理工作流自身实践：规则注入每次会话必读入口引导文件（AGENTS.md/CLAUDE.md），而非仅仓库内沉睡文档",
+        "done_definition": [
+          "三项产物全部落地且验收输出 DEV-001 acceptance PASS",
+          "无产品代码改动：产物仅 docs/development-principles.md、AGENTS.md 原则段、.governance/ 记录",
+          "evidence-log 记录文件路径、命令输出与完成时间（EVD-004）"
+        ]
+      },
+      "acceptance_contract": {
+        "scenario": "在 dsh-reasoning-level 仓库根执行一致性校验：原则文档存在、AGENTS.md 含原则段、plan-tracker 含引用，且 7+4 条原文逐条存在",
+        "command": "python -c \"import pathlib; d=pathlib.Path('docs/development-principles.md'); assert d.is_file(), 'principles doc missing'; a=pathlib.Path('AGENTS.md').read_text(encoding='utf-8'); assert '项目开发原则' in a, 'AGENTS.md section missing'; t=pathlib.Path('.governance/plan-tracker.md').read_text(encoding='utf-8'); assert 'docs/development-principles.md' in t, 'tracker ref missing'; c=d.read_text(encoding='utf-8'); assert '分析和推演需要基于事实' in c and '一个commit承载一个问题修改/功能实现' in c, 'principles verbatim missing'; print('DEV-001 acceptance PASS')\"",
+        "expected_output": "DEV-001 acceptance PASS（exit 0）",
+        "last_run": {
+          "status": "PASS",
+          "exit_code": 0,
+          "summary": "2026-08-23 运行一致性校验：python -c 断言三处产物（原则文档存在/AGENTS.md 含『项目开发原则』段/plan-tracker 含引用）+ 7+4 条原文逐条存在，输出 DEV-001 acceptance PASS（exit 0）；命令输出与文件路径见 evidence-log EVD-004"
+        },
+        "demo_evidence": "evidence-log EVD-004 记录命令输出；直接可读产物 docs/development-principles.md 与 AGENTS.md『项目开发原则』段"
+      },
+      "quality_budget": {
+        "dimensions": {
+          "performance": {
+            "threshold": "无运行时性能路径：交付物为文档与入口文本段",
+            "validation": "node --check lib/index.js（既有语法门禁；本任务不触碰运行时）",
+            "status": "EXEMPT",
+            "evidence": "EVD-001~003（接入基线事实）",
+            "exception": "维度不适用：治理记录与入口文本交付，不引入任何运行时改动"
+          },
+          "reliability": {
+            "threshold": "无运行时可靠性影响：不改动 lib 行为",
+            "validation": "node scripts/client-smoke.mjs（既有冒烟门禁；本任务不触碰运行时）",
+            "status": "EXEMPT",
+            "evidence": "EVD-001~003（接入基线事实）",
+            "exception": "维度不适用：无运行时/数据路径被本任务修改"
+          },
+          "security": {
+            "threshold": "文档不含密钥/密钥占位，不引入安全面",
+            "validation": "grep -n \"secret\\|token\\|password\" docs/development-principles.md（应无命中）",
+            "status": "EXEMPT",
+            "evidence": "EVD-004（验收命令输出）",
+            "exception": "维度不适用：纯文档交付，无新增攻击面；上述检查为预防性确认"
+          },
+          "accessibility": {
+            "threshold": "原则文档中文可读、结构与用户原文一致",
+            "validation": "check-governance 人工核对文档结构与可读性（中文原文）",
+            "status": "EXEMPT",
+            "evidence": "EVD-004",
+            "exception": "维度不适用：文档面向维护者/代理而非终端交互界面"
+          },
+          "ux": {
+            "threshold": "原则文档结构与用户提供原文一致：不翻译、不改写、不精简",
+            "validation": "python -c 断言 7+4 条原文逐条存在于文档（与用户消息人工比对）",
+            "status": "PASS",
+            "evidence": "EVD-004（验收命令输出）",
+            "exception": ""
+          },
+          "maintainability": {
+            "threshold": "原则集中单一文档 + 入口引用，AGENTS.md 内原则段仅出现一次",
+            "validation": "python -c \"print(open('AGENTS.md',encoding='utf-8').read().count('项目开发原则'))\"（期望 1）",
+            "status": "PASS",
+            "evidence": "EVD-004",
+            "exception": ""
+          }
+        }
+      },
+      "vertical_slice": {
+        "user_visible_slice": "DSH 会话在 dsh-reasoning-level 下自动注入项目开发原则段（AGENTS.md），用户或代理在下一次会话即感知原则约束：这是本任务最小可感知切片",
+        "demo_path": "dsh-reasoning-level/AGENTS.md『项目开发原则』段 + docs/development-principles.md（直接可读证据，无需运行服务）",
+        "scope_guard": "仅 docs/development-principles.md（新建）、AGENTS.md（末尾追加原则段）、.governance/ 相关记录；不得触碰 lib/、scripts/、package.json、CI 配置",
+        "rollback_plan": "删除 AGENTS.md 原则段、删除 docs/development-principles.md、删除 plan-tracker 引用行——全部纯文本可回退，无运行时影响",
+        "status": "PASS",
+        "evidence": "EVD-004（2026-08-23 验收输出：DEV-001 acceptance PASS）"
+      },
+      "interruption_policy": {
+        "mode": "critical-only: 默认执行可逆的常规工作并在需要时记录假设",
+        "critical_triggers": [
+          "Ask the user when product intent is unclear.",
+          "Ask the user when acceptance standard or done criteria are unclear.",
+          "Ask the user before irreversible, release/versioning, risk acceptance, external dependency, or mode change decisions.",
+          "用户提供的原则原文内容有歧义或改动范围超出 allowed_change_scope 文件清单时询问"
+        ],
+        "auto_execute": [
+          "Run routine execution, local validation, and governance record updates when scope is known and reversible（执行文档创建与入口段追加、更新治理记录、运行本地一致性校验）.",
+          "Commit normal single-task changes when validation and evidence gates are satisfied."
+        ],
+        "assumption_record": {
+          "assumption": "用户提供的原则以中文原文落档，按『开发原则』『编程要求』两段组织，不翻译不改写",
+          "basis": "用户本会话消息即原文事实源（2026-08-23）",
+          "reversibility": "纯文本内容可随时删除或修正，无运行时或数据影响",
+          "validation": "python -c 断言原文逐条存在于文档中（见 acceptance_contract）",
+          "rollback": "git 删除对应段落或文件，或恢复提交前状态"
+        },
+        "interruption_budget": "每个工作单元最多打断用户一次，除非出现新的关键触发"
+      },
+      "allowed_change_scope": [
+        "docs/development-principles.md（新建）",
+        "AGENTS.md（末尾追加『项目开发原则』段，不改动既有 bootstrap 段）",
+        ".governance/plan-tracker.md（项目配置引用行、DEV-001 状态行、最近完成区）",
+        ".governance/evidence-log.md（EVD-004 行）",
+        ".governance/execution-packets.json（本任务执行包字段回写）"
+      ],
+      "required_evidence": [
+        "EVD-004 行含 事实依据（文件路径与命令输出）与 目标对齐",
+        "验收命令输出 DEV-001 acceptance PASS（exit 0）",
+        "结构化事实 JSON（commands/files_changed/review=NOT_REQUIRED）"
+      ],
+      "next_commands": [
+        "python -c \"import pathlib; d=pathlib.Path('docs/development-principles.md'); assert d.is_file(); a=pathlib.Path('AGENTS.md').read_text(encoding='utf-8'); assert '项目开发原则' in a; t=pathlib.Path('.governance/plan-tracker.md').read_text(encoding='utf-8'); assert 'docs/development-principles.md' in t; print('DEV-001 acceptance PASS')\"",
+        "python D:/AI/agent/claude/coding/project_management_workflow/skills/software-project-governance/infra/verify_workflow.py check-governance --summary-only"
+      ],
+      "done_definition": [
+        "三项产物落地且验收命令输出 PASS",
+        "审查状态=不需审查（治理记录任务，无产品代码改动，不触发后置审查路由）",
+        "证据 EVD-004 记录完成快照"
+      ],
+      "source": "plan-tracker.md##当前活跃事项"
+    },
+    "DEV-002": {
+      "task_id": "DEV-002",
+      "priority": "P1",
+      "status": "⏳ 待启动（DEV-001 完成后接续）",
+      "goal": "把 v0.7.0 工作区既有的 5 文件未提交变更整理为按功能分组的提交（README.md/VERIFICATION.md/lib/client.js/lib/index.js/package.json），遵循『一个 commit 一个问题』原则并跑通既有 CI 等价门禁（语法检查 + client-smoke + 依赖策略）",
+      "product_success_contract": {
+        "user": "通过 dsh plugin update 获取 v0.7.0 的用户，以及仓库维护者/审查者",
+        "job_to_be_done": "把已完成的 v0.7.0 功能变更以可审查、可回溯、单一关注点的提交落地，为发布做好准备",
+        "non_goals": [
+          "不新增或删减功能：变更内容以工作区既有 diff 为事实边界",
+          "不修改 .github/workflows 与发布流程",
+          "不执行版本发布（发布是后续任务）"
+        ],
+        "success_metrics": [
+          "v0.7.0 功能变更按主题分批进入仓库——用户执行 dsh plugin update 后获得该版本能力",
+          "产品验收场景：设置页可见一键探测与黑名单提示（该场景在既有客户端渲染冒烟覆盖）",
+          "node --check lib/index.js、node --check lib/client.js、node scripts/client-smoke.mjs 均通过"
+        ],
+        "competitive_baseline": "仓库既有提交风格（每条提交一个主题，如 v0.6.0 加固、v0.5.0 i18n 基础）",
+        "done_definition": [
+          "5 个文件按功能分组完成提交，工作区剩余变更与任务边界一致",
+          "既有 CI 等价门禁（语法/冒烟/依赖策略）通过",
+          "产品代码变更经 Code Reviewer 独立审查（M7.4 审查状态列更新）"
+        ]
+      },
+      "acceptance_contract": {
+        "scenario": "在仓库根运行既有 CI 等价检查：语法检查 + client-smoke + 依赖策略校验，全部通过",
+        "command": "node scripts/client-smoke.mjs",
+        "expected_output": "client smoke 无异常输出且 exit 0（另执行 node --check lib/index.js 与 lib/client.js）",
+        "last_run": {
+          "status": "not_run_yet",
+          "exit_code": null,
+          "summary": "2026-08-23 待启动：DEV-002 执行时运行冒烟与语法检查并回写本字段，输出记入 evidence-log"
+        },
+        "demo_evidence": "DEV-002 执行时运行 node scripts/client-smoke.mjs 的输出记入 evidence-log"
+      },
+      "quality_budget": {
+        "dimensions": {
+          "performance": {
+            "threshold": "本任务不引入运行时性能路径（仅提交组织与既有代码），无新性能预算",
+            "validation": "node --check lib/index.js && node --check lib/client.js（语法门禁）",
+            "status": "EXEMPT",
+            "evidence": "DEV-002 执行时记录",
+            "exception": "维度不适用：不新增运行时逻辑，以既有性能特征为准"
+          },
+          "reliability": {
+            "threshold": "既有冒烟覆盖的加载/渲染路径不因提交组织而退化",
+            "validation": "node scripts/client-smoke.mjs（既有冒烟门禁）",
+            "status": "NOT_RUN_YET",
+            "evidence": "DEV-002 执行时记录",
+            "exception": ""
+          },
+          "security": {
+            "threshold": "无新增依赖与网络面：dependencies 保持为空",
+            "validation": "node -e \"const p=require('./package.json'); if(Object.keys(p.dependencies||{}).length!==0) throw new Error('deps must be empty')\"（CI 依赖策略等价）",
+            "status": "EXEMPT",
+            "evidence": "package.json（dependencies 空，EVD-001 基线）",
+            "exception": "维度不适用：不引入新依赖/端点；既有 CI 依赖策略门禁继续生效"
+          },
+          "accessibility": {
+            "threshold": "设置页既有交互与文案不因提交组织而改变",
+            "validation": "node scripts/client-smoke.mjs（既有冒烟覆盖客户端渲染）",
+            "status": "EXEMPT",
+            "evidence": "DEV-002 执行时记录",
+            "exception": "维度不适用：无界面改动（变更内容为既有 v0.7.0 功能本身，其界面改动已随原开发完成）"
+          },
+          "ux": {
+            "threshold": "用户获得 v0.7.0 能力的方式不变：dsh plugin update 后设置页出现新功能",
+            "validation": "node scripts/client-smoke.mjs + 手动核对 README 使用说明",
+            "status": "NOT_RUN_YET",
+            "evidence": "DEV-002 执行时记录",
+            "exception": ""
+          },
+          "maintainability": {
+            "threshold": "提交按功能主题分组，git log 逐条可回溯，无混合主题提交",
+            "validation": "git log --oneline -10（check 提交主题分组）",
+            "status": "NOT_RUN_YET",
+            "evidence": "DEV-002 执行时记录",
+            "exception": ""
+          }
+        }
+      },
+      "vertical_slice": {
+        "user_visible_slice": "v0.7.0 功能（一键探测并固化配置、黑名单/能力声明持久化等）以正式提交进入仓库——用户执行 dsh plugin update 后获得",
+        "demo_path": "git log --oneline（回溯 v0.7.0 分组提交）+ node scripts/client-smoke.mjs（运行输出）",
+        "scope_guard": "仅 README.md、VERIFICATION.md、lib/client.js、lib/index.js、package.json 五个既有修改文件；不得引入新改动或触碰 CI",
+        "rollback_plan": "推送前可 git reset 回退分组；已推送则按主题 revert（回退前确认无他人拉取）",
+        "status": "NOT_RUN_YET",
+        "evidence": "DEV-002 执行时记录"
+      },
+      "interruption_policy": {
+        "mode": "critical-only: 默认执行可逆的常规工作并在需要时记录假设",
+        "critical_triggers": [
+          "Ask the user when product intent is unclear.",
+          "Ask the user when acceptance standard or done criteria are unclear.",
+          "Ask the user before irreversible, release/versioning, risk acceptance, external dependency, or mode change decisions.",
+          "发现工作区 diff 与任务边界不一致（新增未预期文件/改动）或分组方案存在歧义时询问"
+        ],
+        "auto_execute": [
+          "Run routine execution, local validation, and governance record updates when scope is known and reversible（提交分组、本地校验、更新治理记录）.",
+          "Commit normal single-task changes when validation and evidence gates are satisfied."
+        ],
+        "assumption_record": {
+          "assumption": "既有工作区 diff 即为 v0.7.0 全部待提交变更，不做内容层面的新增或改写",
+          "basis": "git status 5 文件修改清单（EVD-001，2026-08-23 接入基线）",
+          "reversibility": "提交前可随时 stash 或回退；推送前无共享影响",
+          "validation": "git diff --stat 与 git status 核对一致性",
+          "rollback": "git stash 或 git reset --soft 恢复分组前状态"
+        },
+        "interruption_budget": "每个工作单元最多打断用户一次，除非出现新的关键触发"
+      },
+      "allowed_change_scope": [
+        "README.md（按既有 diff 提交，不额外改写内容）",
+        "VERIFICATION.md（按既有 diff 提交）",
+        "lib/client.js（按既有 diff 提交）",
+        "lib/index.js（按既有 diff 提交）",
+        "package.json（按既有 diff 提交，不动 dependencies/peers 语义）",
+        ".governance/plan-tracker.md（DEV-002 状态与证据引用）",
+        ".governance/evidence-log.md（DEV-002 证据行）"
+      ],
+      "required_evidence": [
+        "事实依据：git diff 摘要与 CI 等价检查（语法/冒烟）输出",
+        "目标对齐：v0.7.0 交付目标（一键探测固化配置与既有观测体系一致）",
+        "用户影响：获得=v0.7.0 能力；感知=设置页新按钮；体验变化=否（对既有行为无破坏）",
+        "结构化事实 JSON（commands/files_changed/review）"
+      ],
+      "next_commands": [
+        "node --check lib/index.js",
+        "node --check lib/client.js",
+        "node scripts/client-smoke.mjs"
+      ],
+      "done_definition": [
+        "README.md、VERIFICATION.md、lib/client.js、lib/index.js、package.json 全部按主题分组提交，git status 干净",
+        "产品代码变更经 Code Reviewer 独立审查（M7.4，审查状态列更新）",
+        "证据已入 evidence-log（含 事实依据/目标对齐/用户影响/结构化事实）"
+      ],
+      "source": "plan-tracker.md##当前活跃事项"
+    },
+    "DEV-003": {
+      "task_id": "DEV-003",
+      "priority": "P1",
+      "status": "⏳ 待启动（DEV-001 完成后接续）",
+      "goal": "评估当前无单元测试的回归风险并补齐最小回归防护：为 lib/ 核心决策路径补充最小单元测试（node:test 或等价，零新依赖）或输出明确的评估结论（QA 参与，测试设计后触发 Test Reviewer）",
+      "product_success_contract": {
+        "user": "仓库维护者/发布者，以及通过 dsh plugin 安装插件、在版本升级后遇到行为回归的用户",
+        "job_to_be_done": "让后续迭代的行为回归在提交前被自动捕获，而非用户侧才发现（参照 v0.4 探测全部失败类根因问题）",
+        "non_goals": [
+          "不引入新运行时依赖：dependencies 保持为空（CI 依赖策略强制）",
+          "不重写既有 lib 逻辑（仅补测试或最小可测钩子，行为不变）",
+          "不做客户端 UI 全量端到端测试（冒烟已覆盖加载路径）"
+        ],
+        "success_metrics": [
+          "新增最小回归测试文件（node:test）——行为回归在推送前被自动捕获，使用者免于重复遭遇既有问题历史",
+          "node --test 一键运行且全部通过（exit 0）",
+          "核心决策路径（等级过滤/黑名单/能力声明合并）有断言覆盖"
+        ],
+        "competitive_baseline": "既有 CI（ci.yml check job）注入测试步骤：一个最小测试文件即构成防护网",
+        "done_definition": [
+          "最小测试落地并一键运行通过，或评估结论明确记录『补齐路径与收益』",
+          "Test Reviewer 审查测试设计/用例（审查状态列更新）",
+          "证据入 evidence-log（事实依据/目标对齐/用户影响/结构化事实）"
+        ]
+      },
+      "acceptance_contract": {
+        "scenario": "在仓库根运行最小测试套件：node --test 输出全部用例通过",
+        "command": "node --test test/",
+        "expected_output": "node --test 输出测试通过统计且 exit 0",
+        "last_run": {
+          "status": "not_run_yet",
+          "exit_code": null,
+          "summary": "2026-08-23 待启动：DEV-003 执行时运行 node --test 并回写本字段，输出记入 evidence-log"
+        },
+        "demo_evidence": "DEV-003 执行时 node --test 输出记入 evidence-log"
+      },
+      "quality_budget": {
+        "dimensions": {
+          "performance": {
+            "threshold": "测试运行开销：单测全套分钟级以内",
+            "validation": "node --test test/ 计时（脚本执行时间）",
+            "status": "NOT_RUN_YET",
+            "evidence": "DEV-003 执行时记录",
+            "exception": ""
+          },
+          "reliability": {
+            "threshold": "核心决策路径回归测试全部通过",
+            "validation": "node --test test/（断言等级过滤/黑名单/能力声明合并）",
+            "status": "NOT_RUN_YET",
+            "evidence": "DEV-003 执行时记录",
+            "exception": ""
+          },
+          "security": {
+            "threshold": "测试不引入网络/密钥访问，不脏化端到端密钥",
+            "validation": "grep -n \"sk-\\|api_key\\|token\" test/（应无命中）",
+            "status": "EXEMPT",
+            "evidence": "DEV-003 执行时记录",
+            "exception": "维度不适用：测试仅针对纯逻辑路径；上述检查为预防性确认"
+          },
+          "accessibility": {
+            "threshold": "测试覆盖客户端可访问性不属于本任务边界（冒烟已覆盖加载）",
+            "validation": "node scripts/client-smoke.mjs（既有冒烟）",
+            "status": "EXEMPT",
+            "evidence": "EVD-002（ci.yml 事实）",
+            "exception": "维度不适用：本任务聚焦服务端逻辑回归，客户端可访问性由既有冒烟门禁覆盖"
+          },
+          "ux": {
+            "threshold": "测试的存在不改变用户界面；用户价值=升级不再遭遇已知类回归",
+            "validation": "node --test test/ 通过 + 人工核对无界面临时改动",
+            "status": "NOT_RUN_YET",
+            "evidence": "DEV-003 执行时记录",
+            "exception": ""
+          },
+          "maintainability": {
+            "threshold": "测试文件职责单一、与 lib 结构对应、无过度拼接",
+            "validation": "check 测试文件命名与 lib 模块对应关系（人工核对）",
+            "status": "NOT_RUN_YET",
+            "evidence": "DEV-003 执行时记录",
+            "exception": ""
+          }
+        }
+      },
+      "vertical_slice": {
+        "user_visible_slice": "行为回归由测试自动捕获（提交前自动运行）——用户升级后遭遇的问题可被预先拦截，这是本任务最小可感知切片",
+        "demo_path": "node --test test/（运行输出）+ 既有 CI check job 增加测试步骤后的流水线日志",
+        "scope_guard": "仅新增 test/ 目录（node:test 用例，零新依赖）；如评估结论需要，可加 package.json 的 scripts.test 字段；不得改动 lib 行为",
+        "rollback_plan": "删除新增测试文件即可回退；测试不修改运行时行为，无回退风险",
+        "status": "NOT_RUN_YET",
+        "evidence": "DEV-003 执行时记录"
+      },
+      "interruption_policy": {
+        "mode": "critical-only: 默认执行可逆的常规工作并在需要时记录假设",
+        "critical_triggers": [
+          "Ask the user when product intent is unclear.",
+          "Ask the user when acceptance standard or done criteria are unclear.",
+          "Ask the user before irreversible, release/versioning, risk acceptance, external dependency, or mode change decisions.",
+          "评估结论要求修改 lib 生产逻辑（最小可测钩子）或测试覆盖超出文档化功能边界时，先呈现方案询问"
+        ],
+        "auto_execute": [
+          "Run routine execution, local validation, and governance record updates when scope is known and reversible（测试文件创建与本地运行、治理记录更新）.",
+          "Commit normal single-task changes when validation and evidence gates are satisfied."
+        ],
+        "assumption_record": {
+          "assumption": "用 node:test（node >= 20 自带）实现最小单测，零新依赖",
+          "basis": "package.json engines node>=20 与 CI 依赖策略 job（dependencies 必须为空）——均为仓库既有事实",
+          "reversibility": "测试文件可整体删除，无运行时影响",
+          "validation": "node --test 运行结果（exit 0 且用例全部通过）",
+          "rollback": "删除新增测试文件即可回退；测试不修改运行时行为，无回退风险"
+        },
+        "interruption_budget": "每个工作单元最多打断用户一次，除非出现新的关键触发"
+      },
+      "allowed_change_scope": [
+        "test/（新建，node:test 用例）",
+        "scripts/（如评估结论需要增加测试运行钩子）",
+        "package.json（仅 scripts.test 字段，不动 dependencies/peers）",
+        ".github/workflows/ci.yml（如评估结论需要把测试步骤纳入 check job）",
+        ".governance/ 相关记录文件"
+      ],
+      "required_evidence": [
+        "事实依据：评估发现（无单测目录/文件，仅冒烟脚本——EVD-003）与测试运行输出",
+        "目标对齐：行为回归防护对应开发原则 4/6（测试看护、质量交付）",
+        "用户影响：获得=回归被预拦截；感知=无界面变化；体验变化=否",
+        "结构化事实 JSON（commands/files_changed/review）"
+      ],
+      "next_commands": [
+        "node --test test/",
+        "node scripts/client-smoke.mjs"
+      ],
+      "done_definition": [
+        "最小测试落地并一键运行通过，或评估结论明确记录补齐路径",
+        "测试设计与用例经 Test Reviewer 审查（审查状态列更新）",
+        "证据入 evidence-log（含 事实依据/目标对齐/用户影响/结构化事实）"
+      ],
+      "source": "plan-tracker.md##当前活跃事项"
+    }
+  }
+}
