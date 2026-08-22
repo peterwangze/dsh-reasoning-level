@@ -1,4 +1,4 @@
-# dsh-reasoning-level 验证协议（v0.6.0）
+# dsh-reasoning-level 验证协议（v0.7.0）
 
 > 本文是「插件不得拖垮宿主」的工程契约：从一次真实事故复盘出发，给出
 > **架构约束（为什么）、实现规约（怎么防）、验证流程（怎么证）** 三层防线。
@@ -70,6 +70,18 @@
     都有捕获与降级路径；
   - `llm/stream` 统计记录可空（`record === null` 时旁路全静默）。
 - `lib/client.js`：组件不引用作用域外未定义标识符（冒烟测试覆盖）。
+- v0.7.0 探测面（新接缝，同 A5 纪律）：
+  - 探测请求 = `llm.stream` 1-token ping，`messages` 必须是 ContentBlock 数组
+    （`[{type:'text', text}]`）——字符串 `content` 会触发适配器
+    `content.some is not a function`，这是 v0.6 探测"全部失败"的根因；
+  - 探测请求带 `probe: true` 标记，`llm/stream` 旁路统计与注入，观测数据零污染；
+  - 单次探测带 30s 超时（AbortController），单模型并发 3；
+  - 分类：`UNSUPPORTED_REASONING_EFFORT` → 黑名单（持久化 probeBlacklist）；
+    限流/超时 → blocked（不黑名单，不误判）；
+  - 固化：实测可用等级写回 `llm-pi-ai` 模型能力声明并持久化 `probeEfforts`
+    （重启后不再被生成表升级覆盖）；用户手写的声明永远跳过；
+  - 固化写走既有 `settings.replace` 整节替换 + `settings/updated` 收敛路径，
+    不新增写面。
 - 安装器（install.ps1 / install.sh）：只做三件事——清理旧残留（只删链接
   本体）、安装前依赖策略自检、调用官方 `dsh plugin` 通道。
 
@@ -116,6 +128,10 @@ dsh --profile canary web          # 观察启动日志无 failed fiber / 无等�
 #    b. 设置 → 统一推理等级 → 页面正常渲染、统计 2s 内出现记录
 #    c. curl http://127.0.0.1:<port>/reasoning-level-stats → 200 + JSON
 #    d. 切换全局等级 high ↔ max → 下一条消息统计里 effort 列变化
+#    e. 设置页点「一键探测全部模型并固化配置」→ 逐模型出结果（可用/拒绝/其他），
+#       完成后黑名单与能力声明写入 settings.yaml（llm-reasoning.probeBlacklist /
+#       probeEfforts）；curl POST /reasoning-level-stats/probe/apply 幂等返回
+#       修正后的写入数
 
 # 4) 清理
 dsh plugin --profile canary remove dsh-reasoning-level

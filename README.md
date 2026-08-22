@@ -2,7 +2,7 @@
 
 > DeepSeek Harness（DSH）统一推理等级插件：**一个设置项，动态管理所有模型的默认思考强度**——含模型级默认与实时调用观测。
 
-[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.6.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
+[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.7.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
 
 ---
 
@@ -35,6 +35,9 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 - **off 线值按协议细化**（v0.4.0）：zai/deepseek thinking 格式下 off 显式发送 `disabled`（默认开启思考的模型真正关闭），openai 系缺省
 - **purpose 级默认**（v0.4.0）：`purposes.compaction` / `purposes.session-title` 独立等级（辅助调用可用 off 省 token）
 - **实测按钮**（v0.4.0）：统计面板发 1-token 请求验证某模型某等级实际可用，网关拒绝自动入黑名单
+- **一键探测并固化配置**（v0.7.0）：统计面板**一个按钮**探测全部模型的全部候选等级——实测可用的等级自动写回模型能力声明、实测拒绝的等级入黑名单（两级配置都持久化，重启生效）；限流/超时等错误与"等级不可用"严格区分，不再误判
+- **探测可用性修复**（v0.7.0）：修复 v0.4 以来探测"全部显示失败"的根因——测试请求的 `Message.content` 必须是 ContentBlock 数组，旧代码传字符串导致适配器在组装阶段就报 `content.some is not a function`（与模型是否支持等级无关）；探测请求标记旁路统计（不污染观测数据），单次 30s 超时、单模型并发 3，探测中的请求全部带 `probe` 标记免污染
+- **黑名单/能力声明持久化**（v0.7.0）：`llm-reasoning.probeBlacklist`（实测拒绝等级）与 `llm-reasoning.probeEfforts`（实测能力声明）落盘 settings.yaml，重启后不再被生成表覆盖/升级，实测结果即真值；用户手写的模型声明永不被探测覆盖
 - **CSV 导出 + 建议列**（v0.4.0）：统计一键导出 CSV；聚合表显示错误率/实测拒绝建议
 - **i18n 基础**（v0.5.0）：client 接入 locale（zh/en 标题与区块）
 - **事故加固**（v0.6.0，[VERIFICATION.md](./VERIFICATION.md)）：`dependencies` 清零、宿主包全 peer（`*`）对齐 DSH out-of-tree 官方契约；安装全面改走 `dsh plugin` 通道（不再 junction 共享树/手改 patch/写 settings）；全部注册与钩子失败就地降级，绝不允许升级为 DSH 启动失败；修复设置页统计面板 `t is not defined` 渲染崩溃；新增渲染冒烟测试与依赖策略 CI 门禁
@@ -108,7 +111,7 @@ dsh plugin --profile web add link:/path/to/dsh-reasoning-level
 |---|---|
 | 全局开关 + 默认等级 | 总开关（`enabled`）与全局默认等级（`level`） |
 | 模型级默认 | 按 `provider/model` 覆盖全局默认；下拉只列**该模型实测支持**的等级，模型名旁标注支持列表，每行有删除按钮 |
-| 实时调用统计 | 每次调用的实际等级/思考 tokens/输出/结束原因 + 按模型聚合（等级分布） |
+| 实时调用统计 | 每次调用的实际等级/思考 tokens/输出/结束原因 + 按模型聚合（等级分布）；顶部**一键探测全部模型并固化配置**——逐模型实测全部候选等级（1-token），可用等级写回能力声明、拒绝等级入黑名单 |
 | 状态行 | 已应用路由/模型数、DeepSeek 官方默认 |
 
 ### 2. 推荐上手路径
@@ -140,6 +143,9 @@ llm-reasoning:
     session-title: off
   syncDefaultAgent: false  # true = 全局等级变化同步 agent-default-model.reasoningEffort
   statsPublic: false       # true = 统计端点允许 LAN 访问（默认仅回环）
+  # 以下两项由「一键探测」自动维护，一般无需手改：
+  probeBlacklist: {}       # provider/model -> 网关实测拒绝的等级（注入跳过）
+  probeEfforts: {}         # provider/model -> 实测能力声明（不被生成表升级覆盖）
 ```
 
 插件运行时自动维护：`llm-pi-ai.providers.<route>.models[].reasoningEfforts`（能力声明，含旧版自动升级）、`llm-pi-ai.providers.<route>.reasoning`（路由默认）、`llm-deepseek.reasoningEffort`。
