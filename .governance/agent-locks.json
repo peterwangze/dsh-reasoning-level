@@ -1,4 +1,16 @@
 {
-  "active_tasks": {},
-  "file_locks": {}
+  "active_tasks": {
+    "DEV-003": {
+      "spawned_at": "2026-08-23T02:30:00",
+      "coordinator_session": "20260823-GOVINIT",
+      "target_files": ["test/", "lib/client.js", "lib/index.js", ".github/workflows/ci.yml", "package.json"]
+    }
+  },
+  "file_locks": {
+    "test/": { "locked_by": "DEV-003", "locked_at": "2026-08-23T02:30:00", "ttl_seconds": 7200, "ttl_reason": "QA 测试评估+用例补齐+T2" },
+    "lib/client.js": { "locked_by": "DEV-003", "locked_at": "2026-08-23T02:30:00", "ttl_seconds": 7200, "ttl_reason": "N1 超时对齐 + N2 状态重置（Developer 阶段）" },
+    "lib/index.js": { "locked_by": "DEV-003", "locked_at": "2026-08-23T02:30:00", "ttl_seconds": 7200, "ttl_reason": "N4 双引擎 schema 写法（Developer 阶段）" },
+    ".github/workflows/ci.yml": { "locked_by": "DEV-003", "locked_at": "2026-08-23T02:30:00", "ttl_seconds": 7200, "ttl_reason": "T3 node --test 接入 CI（Developer 阶段）" },
+    "package.json": { "locked_by": "DEV-003", "locked_at": "2026-08-23T02:30:00", "ttl_seconds": 7200, "ttl_reason": "T3 CI 依赖供给可能需要 devDependencies（Developer 阶段）" }
+  }
 }

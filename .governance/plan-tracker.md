@@ -40,7 +40,7 @@
 
 | 项目 | 当前阶段 | 总任务数 | 已完成 | 阻塞中 | 关键风险数 | 最近 Gate 结论 | 最近复盘日期 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| dsh-reasoning-level | 开发实现（v0.7.0 开发中） | 3 | 2 | 0 | 1 | 无（G6 待评估） | — |
+| dsh-reasoning-level | 开发实现（v0.7.0 开发完成，待发布决策） | 3 | 3 | 0 | 1 | 无（G6 可评估：29 用例防护网+CI 接入） | — |
 
 ## 当前活跃事项
 
@@ -50,7 +50,7 @@
 |--------|----|------|------|---------|---------|------|
 | **P0** | DEV-001 | 落地项目开发原则与编程要求（7 原则 + 4 编程要求：AGENTS.md 注入 + docs/development-principles.md + plan-tracker 项目配置引用） | — | 0.7.0 | 治理记录范畴（docs/** 与 .governance/** 为治理记录，Coordinator 直写，审查状态=不需审查） | ✅ 完成 (2026-08-23)——三产物落地（docs/development-principles.md 新建 + AGENTS.md『项目开发原则』段追加 + plan-tracker 项目配置引用），验收命令输出 DEV-001 acceptance PASS（EVD-004） |
 | **P1** | DEV-002 | v0.7.0 工作区未提交变更整理与提交（README.md/VERIFICATION.md/lib/client.js/lib/index.js/package.json 共 5 文件）——提交需遵循"一个 commit 一个问题"原则（见开发原则 编程要求 4） | DEV-001 | 0.7.0 | 治理记录 + 产品代码（含产品代码 commit 按变更分组；M7.4 提交任务） | ✅ 完成 (2026-08-23)——7 提交（c157085+33a071e 分组、4107cb3/a15d26a/6d730e1/441d9b4/e3a21d1 返工）；审查=已审查（R0 NEEDS_CHANGE→返工→R1 APPROVED_WITH_NOTES unresolved_blockers=0，EVD-005 + REVIEW-DEV-002-R0/R1）；验证 node --check×2/client-smoke/node --test 8/8 全 exit 0 |
-| **P1** | DEV-003 | 测试防护网评估——当前仅 test/ 最小回归（DEV-002 已建 6 断言）+ client-smoke 冒烟；评估补齐回归防护并决定 CI 接入（对应开发原则 4/6） | DEV-001 | 0.7.0 | 待评估后定（QA 参与；测试设计后自动触发 Test Reviewer）。**R1 复审遗留输入（REVIEW-DEV-002-R1 §6）**：N1 客户端超时对齐（40s<60s 漏判慢模型）、N2 probeSummaryOk 重置、N4 双引擎 schema 写法、T2 resolve-fallback $DSH_HOME、T3 node --test 接入 CI（需先解决 CI 依赖供给）、F7/F9/F11/F12 与测试覆盖缺口（403 门控/err 分支/30s abort）——启动时由用户圈定范围 | ⏳ 待实施（DEV-002 完成后为唯一活跃任务） |
+| **P1** | DEV-003 | 测试防护网评估与补齐（用户 2026-08-23 圈定范围 DEC-008/009：核心测试补齐 + T2 + T3[devDeps 锁版] + N1/N2/N4 + DEF-001；DEF-002/F7/F9/F11/F12 遗留） | DEV-001 | 0.7.0 | QA 评估✅（25/3/0）→ Developer 实现✅（5+4 提交）→ 双 Reviewer 终态：Test Reviewer R0=APPROVED_WITH_NOTES unresolved_blockers=0；Code Reviewer R0=NEEDS_CHANGE（D1+T3-1）→ 返工→ **R1 APPROVED_WITH_NOTES unresolved_blockers=0**（8e75348 P2-01 收尾核验：仅注释级，终态有效） | ✅ 完成 (2026-08-23)——node --test 29/29 exit 0；npm ci 正反实证；审查=已审查（双线终态，EVD-006 + REVIEW-DEV-003-R0/R1/test-R0） |
 
 ### 最近完成
 
@@ -60,6 +60,7 @@
 | --- | --- | --- | --- |
 | DEV-001 | 落地项目开发原则与编程要求（AGENTS.md + docs/development-principles.md + plan-tracker 引用） | 2026-08-23 | EVD-004 |
 | DEV-002 | v0.7.0 变更分组提交 + R0→R1 审查闭环（NEEDS_CHANGE→返工→APPROVED_WITH_NOTES unresolved_blockers=0） | 2026-08-23 | EVD-005 + REVIEW-DEV-002-R0/R1 |
+| DEV-003 | 测试防护网（29 用例+CI 接入）+ N1/N2/N4/DEF-001/D1 修复 + 双 Reviewer 终态（Code R1 + Test R0 均 APPROVED_WITH_NOTES unresolved_blockers=0） | 2026-08-23 | EVD-006 + REVIEW-DEV-003-R0/R1/test-R0 |
 
 ## 版本规划
 

@@ -276,8 +276,8 @@
     "DEV-003": {
       "task_id": "DEV-003",
       "priority": "P1",
-      "status": "⏳ 待实施（未开始——唯一活跃任务，R1 遗留项为输入）",
-      "goal": "评估当前无单元测试的回归风险并补齐最小回归防护：为 lib/ 核心决策路径补充最小单元测试（node:test 或等价，零新依赖）或输出明确的评估结论（QA 参与，测试设计后触发 Test Reviewer）",
+      "status": "✅ 完成 (2026-08-23)——node --test 29/29；双 Reviewer 终态（Code R1 + Test R0 均 APPROVED_WITH_NOTES unresolved_blockers=0）",
+      "goal": "测试防护网评估与补齐（用户圈定 DEC-008）：覆盖缺口（403 门控/err 分支/30s abort 可测性评估）+ T2 resolve-fallback $DSH_HOME + T3 CI 接入方案；N1 客户端超时对齐、N2 probeSummaryOk 重置、N4 双引擎 schema 由 Developer 阶段修复（QA 先写 TDD 期望测试）；F7/F9/F11/F12 遗留跟踪",
       "product_success_contract": {
         "user": "仓库维护者/发布者，以及通过 dsh plugin 安装插件、在版本升级后遇到行为回归的用户",
         "job_to_be_done": "让后续迭代的行为回归在提交前被自动捕获，而非用户侧才发现（参照 v0.4 探测全部失败类根因问题）",
