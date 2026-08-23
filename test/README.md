@@ -8,8 +8,8 @@
 >
 > **TDD 期望失败已转绿**（DEV-003 修复后 28/28 全绿）：N1 客户端超时常量已对齐服务端
 > 最坏上界（95s）、N2 摘要状态随 probeAll 起始重置、gate-5（DEF-001 IPv6 回环）已按
-> WHATWG URL 归一化修复；用例文件内的 `// TDD-FAILS-UNTIL-*` 标注保留为"修复守卫"
-> 语义——回归时失败即提示。
+> WHATWG URL 归一化修复；用例文件内的 `// TDD-GUARD-*`（原 `TDD-FAILS-UNTIL-*`）
+> 标注保留为"修复守卫"语义——回归时失败即提示。
 
 ## 原理
 
@@ -41,10 +41,10 @@ persistBlacklist/hydrateBlacklist/applyProbeResults` 全部执行路径。
 - `probe-concurrency.test.mjs` 并发：6 候选并发峰值 = PROBE_CONCURRENCY=3 + 混合分类矩阵；
 - `schema-semantics.test.mjs` N4：显式 `z.union([z.string(), z.const(null)])` 与生产
   `z.string()` 行为等价（当前引擎 3.18.1）+ 超长（64KB）值边界；
-- `client-meta-constants.test.mjs` **N1 TDD**：源码常量元测试——客户端抓取超时（40s）
-  ≥ 服务端最坏波数×30s+5s（当前失败）；
-- `client-probe-summary.test.mjs` **N2 TDD**：probeAll 起始重置 probeSummaryOk、
-  失败轮后重跑成功恢复绿色（当前失败）；
+- `client-meta-constants.test.mjs` **N1 TDD 守卫**：源码常量元测试——客户端抓取超时（95s）
+  ≥ 服务端最坏波数×30s+5s（已转绿，回归即红）；
+- `client-probe-summary.test.mjs` **N2 TDD 守卫**：probeAll 起始重置 probeSummaryOk、
+  失败轮后重跑成功恢复绿色（已转绿，回归即红）；
 - `resolve-fallback.test.mjs` T2：`$DSH_HOME` 优先（临时伪造树子进程集成）+ 回退
   ~/.dsh（单元 + 反向验证）。
 

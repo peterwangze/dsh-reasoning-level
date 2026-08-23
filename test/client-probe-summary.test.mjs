@@ -1,6 +1,5 @@
 /**
- * N2 行为测试（// TDD-FAILS-UNTIL-N2 —— 曾为 TDD 期望失败：probeAll 起始未重置
- * probeSummaryOk；DEV-003 修复后转绿，标注保留为守卫语义——回归时失败即提示）。
+ * N2 行为测试（// TDD-GUARD-N2，原 TDD-FAILS-UNTIL-N2，已修复转绿，回归即红）。
  *
  * 背景（R1 §3 残留 N2）：probeAll 起始应重置 probeSummaryOk——现状只在失败路径
  * 调用 setProbeSummaryOk(false)，成功路径不重置；一轮失败后重跑成功，摘要仍显示
@@ -118,7 +117,7 @@ function findSummary(node) {
   return null
 }
 
-test('(N2) probeAll 重跑成功时摘要恢复绿色 —  // TDD-FAILS-UNTIL-N2', async () => {
+test('(N2) probeAll 重跑成功时摘要恢复绿色 —  // TDD-GUARD-N2', async () => {
   const source = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
   vm.runInNewContext(source, sandbox, { filename: 'lib/client.js' })
   const client = sandbox.__loaded
