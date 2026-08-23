@@ -1,5 +1,6 @@
 /**
- * N1 源码常量元测试（// TDD-FAILS-UNTIL-N1 —— 当前会失败，Developer 修复后转绿）。
+ * N1 源码常量元测试（// TDD-FAILS-UNTIL-N1 —— 曾为 TDD 期望失败：修复前 40s < 合约
+ * 95s；DEV-003 修复后转绿，标注保留为守卫语义——回归时失败即提示）。
  *
  * 契约：客户端单模型抓取超时 ≥ 服务端单模型最坏时长 + 5s 余量。
  * 服务端最坏时长 = ceil(候选级数上界 / PROBE_CONCURRENCY) × PROBE_TIMEOUT_MS；
