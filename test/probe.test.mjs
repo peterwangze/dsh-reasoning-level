@@ -5,8 +5,9 @@
  *  (a) probeModelLevels 分类：ok / rejected(UNSUPPORTED_REASONING_EFFORT) / blocked(aborted)；
  *  (b) applyProbeResults：用户手写声明跳过、working 白名单、pin 台账；
  *  (c) persistBlacklist / hydrateBlacklist：幂等合并（去重、相同值不再写）；
- *  (d) F1 回归：probeEfforts 含 'disabled' wire 值时经 schema 校验不再抛
- *      ValidationError（旧版 z.union([...LEVELS, null]) 无法表示该值）；
+ *  (d) F1 回归：probeEfforts 值 schema 显式 string|null，含 'disabled' 的 wire 值
+ *      通过校验、非字符串被拒绝（旧版 z.union([...LEVELS, null]) 经
+ *      Schema.from(null) → any() 直通，任意线值都能落盘——见 R1 §0.5）；
  *  (e) F2 回归：settings.replace 失败时返回 writes:0 + error、且不发出
  *      probeEfforts 持久化；重试成功时 replace 先于 mutate。
  */
@@ -74,7 +75,9 @@ test('(b) applyProbeResults：zai 路由 working 白名单固化 + pin 持久化
   // working 白名单：仅 GENERATED_LEVELS ∩ working 且有生成线值的档
   // （off='disabled'、low='low'；xhigh 无生成线值被滤掉；high 被拒绝不入固化）
   assert.deepEqual(state.replaceCalls[0].value.providers.zai.models[0].reasoningEfforts, { off: 'disabled', low: 'low' })
-  // pin 持久化：probeEfforts 写入（旧 schema 在此会因 'disabled' 校验失败而静默不落盘）
+  // pin 持久化：probeEfforts 写入（T1 注释修正——按 R1 §0.5：旧 schema 在本机
+  // schemastery 3.18.1 下经 Schema.from(null)→any() 直通，'disabled' 实际能落盘，
+  // 代价是线值零校验；并非"校验失败静默不落盘"）
   const pe = probeEffortsMutates(state)
   assert.equal(pe.length, 1)
   assert.deepEqual(pe[0].ops[0].value, { 'zai/m2': { off: 'disabled', low: 'low' } })

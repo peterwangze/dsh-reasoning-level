@@ -1,10 +1,15 @@
-# 回归测试（DEV-002 F8）
+# 回归测试（DEV-002 F8 + DEV-003 防护网补齐）
 
-`node --test`（默认发现）或 `node --test "test/**/*.mjs"`——两种形式均以 exit 0 通过。
+`node --test`（默认发现）或 `node --test "test/**/*.mjs"`。
 
 > 已知差异：Node v24（Windows）下传目录字面量 `node --test test/` 会被当作 glob
 > 模式处理且不匹配任何文件，runner 转而按模块入口执行而报 MODULE_NOT_FOUND；
 > 改用默认发现（不带路径参数）或 glob 形式即可。
+>
+> **TDD 期望失败**：`client-meta-constants.test.mjs`（N1 源码常量契约）、
+> `client-probe-summary.test.mjs`（N2 状态重置行为）当前按设计失败，文件内均有
+> `// TDD-FAILS-UNTIL-N1` / `// TDD-FAILS-UNTIL-N2` 标注；Developer 修复对应问题后
+> 转绿。因此 `node --test` 整体退出码在修复前为非 0——这是 TDD 设计而非回归失败。
 
 ## 原理
 
@@ -20,15 +25,32 @@ llm 的 stream/resolveModelInfo、webServer.register 捕获、logger/effect/on/t
 `parseProbeInput -> probeModelLevels -> probeLevelOnce -> markRejected ->
 persistBlacklist/hydrateBlacklist/applyProbeResults` 全部执行路径。
 
-## 覆盖（对应 R0 报告 F8 建议 a-d + F2 回归）
+## 覆盖（DEV-002 a-e + F1/F2 回归 + DEV-003 新增）
 
 - `probe.test.mjs`（a）分类 ok/rejected=UNSUPPORTED/blocked=aborted + 拒绝入黑名单持久化；
 - （b）用户手写声明跳过；working 白名单固化 + pin 持久化（含 'disabled' wire 值经 schema 校验）；
 - （c）hydrateBlacklist/persistBlacklist 幂等合并（去重、相同值不重复写）；
 - （d）F1 回归：probeEfforts 值 schema = string|null（接受 'disabled'/null，拒绝非字符串）；
-- （e）F2 回归：replace 失败无 pin 分叉、成功时 replace 先于 probeEfforts 持久化。
+- （e）F2 回归：replace 失败无 pin 分叉、成功时 replace 先于 probeEfforts 持久化；
+- `gate-access.test.mjs` 403 门控：非回环 + statsPublic=false 拒绝（stats/probe/test/apply），
+  statsPublic=true 放行，回环 Host 变体矩阵；
+- `probe-errors.test.mjs` err 分支：no candidate levels / not-in-pi-ai-config /
+  already-verified / 空 results / 空 body（400）/ /test 端点成功路径；
+- `probe-timeout.test.mjs` 30s abort：中止定时器 30000ms 挂载 + 触发后 blocked 分类
+  （不入黑名单；经 setTimeout 捕获与 signal 中止实现，不做真实等待）；
+- `probe-concurrency.test.mjs` 并发：6 候选并发峰值 = PROBE_CONCURRENCY=3 + 混合分类矩阵；
+- `schema-semantics.test.mjs` N4：显式 `z.union([z.string(), z.const(null)])` 与生产
+  `z.string()` 行为等价（当前引擎 3.18.1）+ 超长（64KB）值边界；
+- `client-meta-constants.test.mjs` **N1 TDD**：源码常量元测试——客户端抓取超时（40s）
+  ≥ 服务端最坏波数×30s+5s（当前失败）；
+- `client-probe-summary.test.mjs` **N2 TDD**：probeAll 起始重置 probeSummaryOk、
+  失败轮后重跑成功恢复绿色（当前失败）；
+- `resolve-fallback.test.mjs` T2：`$DSH_HOME` 优先（临时伪造树子进程集成）+ 回退
+  ~/.dsh（单元 + 反向验证）。
 
 ## 依赖说明
 
 测试不修改 package.json、不安装任何依赖；加载的宿主包版本 = 本机 DSH 平坦回退树
-（`~/.dsh/profiles/node_modules`）版本，与插件运行时契约一致。
+（`$DSH_HOME/profiles/node_modules`，缺省 `~/.dsh/profiles/node_modules`）版本，
+与插件运行时契约一致。CI 接入（T3）方案见 `.dev003/qa-dev003-report.md`——若采纳
+devDependencies 精确锁版供给，本段需随 Developer 实施同步修订。

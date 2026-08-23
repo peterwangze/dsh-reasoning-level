@@ -105,12 +105,13 @@ export async function mount(ctx) {
   await new Promise((resolve) => setImmediate(resolve))
 }
 
-/** 向捕获的路由处理器投递模拟请求，返回 { code, payload }。 */
-export async function callRoute(state, path, body) {
+/** 向捕获的路由处理器投递模拟请求，返回 { code, payload }。
+ *  host 可覆盖（403 门控测试需要非回环 Host）；text/plain 响应折叠为 { text }。 */
+export async function callRoute(state, path, body, host = '127.0.0.1') {
   const handler = state.routes.get(path)
   if (handler === undefined) throw new Error('no route registered: ' + path)
   const req = new EventEmitter()
-  req.headers = { host: '127.0.0.1' }
+  req.headers = { host }
   const res = {
     writeHead(code, hdrs) {
       this.code = code
@@ -128,13 +129,32 @@ export async function callRoute(state, path, body) {
   req.emit('data', typeof body === 'string' ? body : JSON.stringify(body ?? {}))
   req.emit('end')
   await done
-  return { code: res.code, payload: JSON.parse(res.payload) }
+  let payload
+  try {
+    payload = JSON.parse(res.payload)
+  } catch {
+    payload = { text: res.payload } // 403 等 text/plain 响应
+  }
+  return { code: res.code, payload }
 }
 
 /** llm.stream 桩：按 reason 生成一个立即结束的 finish 流。 */
 export function statusChunks(reason) {
   return async function* (options) {
     yield { type: 'finish', reason }
+  }
+}
+
+/** llm.stream 桩：延迟 delayMs 后 yield finish，用于并发计数（onEnter/onExit 钩子跟踪在途数）。 */
+export function latencyChunks(reason, delayMs = 5, onEnter, onExit) {
+  return async function* () {
+    onEnter?.()
+    try {
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+      yield { type: 'finish', reason }
+    } finally {
+      onExit?.()
+    }
   }
 }
 
