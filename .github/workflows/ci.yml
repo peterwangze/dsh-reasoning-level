@@ -38,7 +38,9 @@ jobs:
       - name: Client render smoke (loading + loaded paths)
         run: node scripts/client-smoke.mjs
       - name: Install pinned host packages for tests (devDependencies)
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        # --legacy-peer-deps：根项目 peers 全 '*'（运行时由 DSH 平坦回退树解析），
+        # 测试仅需 import 链三包；跳过 npm≥7 的 peers 自动安装，避免依赖树同步/ERESOLVE。
+        run: npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund
       - name: Regression tests (node --test)
         run: node --test
       - name: Validate bundle patch and install scripts present

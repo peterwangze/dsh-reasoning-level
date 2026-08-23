@@ -56,5 +56,10 @@ persistBlacklist/hydrateBlacklist/applyProbeResults` 全部执行路径。
 - **CI**（T3，devDependencies 精确锁版供给）：devDependencies 锁版 import 链上的
   三包——`@deepseek-ai/schemastery@3.18.1`、`@deepseek-ai/dsh-settings@0.1.1-rc.2`
   与 `@deepseek-ai/cordis@4.0.1`（dsh-settings 模块级 import cordis，必须同装）；
-  ci.yml 执行 `npm ci --ignore-scripts --no-audit --no-fund` + `node --test`。
+  ci.yml 执行 `npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund`
+  + `node --test`。**--legacy-peer-deps 处方与根因**：根项目 peerDependencies 全 `*`
+  （运行时由 DSH 平坦回退树解析），测试仅需上述 import 链三包；npm≥7 的 peers
+  自动安装会尝试补齐未在 lock 中的 peers（并可触发 `dsh-brand` 版本冲突），
+  必须跳过——本地安装与 CI 命令同处方（本地已实证：不带 flag 的 `npm ci` 解析失败，
+  带 flag 成功）。
   运行时契约不变：`dependencies` 仍为空、peers 仍全 `*`、发布物不含 node_modules。
