@@ -37,6 +37,10 @@ jobs:
           "
       - name: Client render smoke (loading + loaded paths)
         run: node scripts/client-smoke.mjs
+      - name: Install pinned host packages for tests (devDependencies)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Regression tests (node --test)
+        run: node --test
       - name: Validate bundle patch and install scripts present
         run: |
           test -f cordis.patch.yml || { echo "missing cordis.patch.yml"; exit 1; }

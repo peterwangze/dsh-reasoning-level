@@ -6,10 +6,10 @@
 > 模式处理且不匹配任何文件，runner 转而按模块入口执行而报 MODULE_NOT_FOUND；
 > 改用默认发现（不带路径参数）或 glob 形式即可。
 >
-> **TDD 期望失败**：`client-meta-constants.test.mjs`（N1 源码常量契约）、
-> `client-probe-summary.test.mjs`（N2 状态重置行为）当前按设计失败，文件内均有
-> `// TDD-FAILS-UNTIL-N1` / `// TDD-FAILS-UNTIL-N2` 标注；Developer 修复对应问题后
-> 转绿。因此 `node --test` 整体退出码在修复前为非 0——这是 TDD 设计而非回归失败。
+> **TDD 期望失败已转绿**（DEV-003 修复后 28/28 全绿）：N1 客户端超时常量已对齐服务端
+> 最坏上界（95s）、N2 摘要状态随 probeAll 起始重置、gate-5（DEF-001 IPv6 回环）已按
+> WHATWG URL 归一化修复；用例文件内的 `// TDD-FAILS-UNTIL-*` 标注保留为"修复守卫"
+> 语义——回归时失败即提示。
 
 ## 原理
 
@@ -50,7 +50,11 @@ persistBlacklist/hydrateBlacklist/applyProbeResults` 全部执行路径。
 
 ## 依赖说明
 
-测试不修改 package.json、不安装任何依赖；加载的宿主包版本 = 本机 DSH 平坦回退树
-（`$DSH_HOME/profiles/node_modules`，缺省 `~/.dsh/profiles/node_modules`）版本，
-与插件运行时契约一致。CI 接入（T3）方案见 `.dev003/qa-dev003-report.md`——若采纳
-devDependencies 精确锁版供给，本段需随 Developer 实施同步修订。
+- **本地开发**：零安装可跑——`resolve-fallback.mjs` 标准解析失败时回退到本机 DSH
+  平坦回退树（`$DSH_HOME/profiles/node_modules`，缺省 `~/.dsh/...`）；仓库存在
+  node_modules（npm install 后）时标准解析优先，回退树其次，语义不变。
+- **CI**（T3，devDependencies 精确锁版供给）：devDependencies 锁版 import 链上的
+  三包——`@deepseek-ai/schemastery@3.18.1`、`@deepseek-ai/dsh-settings@0.1.1-rc.2`
+  与 `@deepseek-ai/cordis@4.0.1`（dsh-settings 模块级 import cordis，必须同装）；
+  ci.yml 执行 `npm ci --ignore-scripts --no-audit --no-fund` + `node --test`。
+  运行时契约不变：`dependencies` 仍为空、peers 仍全 `*`、发布物不含 node_modules。
