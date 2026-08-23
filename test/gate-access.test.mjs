@@ -46,11 +46,20 @@ test('(gate-4) 回环 Host 变体（IPv4/localhost 形式）→ 放行 200；非
   assert.equal(r.code, 403)
 })
 
-test('(gate-5) IPv6 回环 Host 放行 —  // TDD-FAILS-UNTIL-FIX-001：isLoopbackHost 的 host.split(\':\')[0] 对 "[::1]" 返回 "[", IPv6 形式永不匹配（缺陷 DEF-001）', async () => {
+test('(gate-5) IPv6 回环 Host 放行 —  // TDD-FAILS-UNTIL-FIX-001（已转绿）：isLoopbackHost 的 host.split(\':\')[0] 对 "[::1]" 返回 "[", IPv6 形式永不匹配（缺陷 DEF-001），DEV-003 按 WHATWG URL 归一化修复；标注保留为守卫语义', async () => {
   const { ctx, state } = makeCtx({ nsConfig: { enabled: false, statsPublic: false } })
   await mount(ctx)
   for (const host of ['[::1]', '[::1]:8080', '::1']) {
     const r = await callRoute(state, '/reasoning-level-stats', {}, host)
     assert.equal(r.code, 200, host + ' 应为回环放行（当前 403=缺陷 DEF-001）')
+  }
+})
+
+test('(gate-d1) Host 头恶意形态（userinfo/path/fragment）—  // TDD-FAILS-UNTIL-FIX-D1（已转绿）：URL 归一化吞没 userinfo/path/fragment——127.0.0.1/x、x@127.0.0.1、127.0.0.1#y 均归一化为 127.0.0.1 而放行（统计/探测端点的安全边界回归 D1）；字符集预检修复后转绿，标注保留为守卫语义', async () => {
+  const { ctx, state } = makeCtx({ nsConfig: { enabled: false, statsPublic: false } })
+  await mount(ctx)
+  for (const host of ['127.0.0.1/x', 'x@127.0.0.1', '127.0.0.1#y']) {
+    const r = await callRoute(state, '/reasoning-level-stats', {}, host)
+    assert.equal(r.code, 403, host + ' 应被拒绝（当前放行=缺陷 D1）')
   }
 })
