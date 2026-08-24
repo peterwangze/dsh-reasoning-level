@@ -1,6 +1,6 @@
 ## Governance Bootstrap（强制 — 每次会话第一动作）
 
-> @bootstrap-version: 0.75.0（模板最低引导版本——低于 SKILL frontmatter active_version 即陈旧，先升级本段再继续）
+> @bootstrap-version: 0.76.0（模板最低引导版本——低于 SKILL frontmatter active_version 即陈旧，先升级本段再继续）
 
 **⚡ SELF-CHECK（在任何输出之前先问自己）**：
 1. 我是否已经读了 `.governance/plan-tracker.md`？否 → **立即停止，先去读**
@@ -170,6 +170,20 @@
 如果 plan-tracker 中有 passed-with-conditions 遗留项或有进行中的 P0 任务 → 优先处理。上一 session 未完成的 P0 任务 → 继续执行（从 session-snapshot.md 中识别）。
 
 **没读 plan-tracker 就开始干活 = 流程违规。跳过交叉验证 = 流程违规。跳过阶段跳跃防护 = 流程违规。这不是"建议"，是前置条件。**
+
+### Bootstrap 变更纪律（MANDATORY — 工作流开发者 MUST 遵守）
+
+```
+❌ 禁止：直接修改 平台原生入口文件 添加新行为
+         → 改了用户得不到——狗粮实例不是事实源
+
+✅ 强制：commands/governance-init.md Step 7 注入模板 → bump 版本 →
+        用户 /plugin update → bootstrap 自升级 → 本仓库 平台原生入口文件 同步
+         → 模板是唯一事实源，用户通过插件更新获得
+```
+
+**MUST NOT** 直接修改本文件来添加新行为。**MUST** 先改 `commands/governance-init.md` Step 7（canonical source），bump 版本。本文件是狗粮实例——修改它只影响本仓库，用户拿不到。
+这是 FIX-011 自升级机制的一部分：你自己的 bootstrap 也必须通过正确流向升级。
 
 ## 干活前检查（每次收到任务时）
 
