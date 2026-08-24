@@ -82,8 +82,10 @@
     （重启后不再被生成表升级覆盖）；用户手写的声明永远跳过；
   - 固化写走既有 `settings.replace` 整节替换 + `settings/updated` 收敛路径，
     不新增写面。
-- 安装器（install.ps1 / install.sh）：只做三件事——清理旧残留（只删链接
-  本体）、安装前依赖策略自检、调用官方 `dsh plugin` 通道。
+- 安装器（install.ps1 / install.sh）：清理旧残留（只删链接本体）、安装前
+  依赖策略自检、调用官方 `dsh plugin` 通道；`-Link/--link` 模式带前置自检
+  （从源码目录实测解析宿主导入面 `@deepseek-ai/schemastery` / `dsh-settings`，
+  缺依赖即拒绝并引导 `file:`）——杜绝 link: 缺 node_modules 导致的整机启动失败。
 
 ## 3. 验证流程（三层防线）
 

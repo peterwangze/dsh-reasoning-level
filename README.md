@@ -59,17 +59,22 @@ dsh plugin --profile web remove dsh-reasoning-level              # 卸载
 
 安装后自动挂载为 profile 的 bundle 层（`dsh.profile.bundles`），**重启 DSH 生效**，无需手改任何配置文件。
 
-本地开发（改代码即生效，无需重装）：
+本地开发也用 `file:` 快照（源码改动后 `remove` 再 `add` 刷新即可）：
 
 ```sh
-dsh plugin --profile web add link:/path/to/dsh-reasoning-level
+dsh plugin --profile web add file:/path/to/dsh-reasoning-level
+dsh plugin --profile web remove dsh-reasoning-level                # 改代码后：先移除
+dsh plugin --profile web add file:/path/to/dsh-reasoning-level     # 再重新装（刷新快照）
 ```
 
-> `file:` 规格是 pnpm 的内容寻址快照，源码更新后需 `remove` 再 `add` 刷新；
-> `link:` 是符号链接直连源码，无此问题——但 **`link:` 要求源码目录自带完整
-> node_modules**（能解析全部宿主包 peers），否则插件加载即
-> `ERR_MODULE_NOT_FOUND`（DSH 的 peers 回退树只从 profile 物化目录可达，
-> 不从源码真实路径可达）。普通安装一律用 `file:`。
+> ⚠️ **普通安装一律用 `file:`，不要照抄 `link:`**：`link:` 是符号链接直连源码
+> （改代码免重装），但 `link:` 下 Node 从**源码真实路径**向上解析依赖，永远够不到
+> `$DSH_HOME/profiles/node_modules` 平坦回退树；插件的宿主包 peers
+> （`@deepseek-ai/schemastery`、`@deepseek-ai/dsh-settings` 等）只由该回退树供给。
+> 源码目录一旦缺 `node_modules`，插件加载即 `ERR_MODULE_NOT_FOUND`，**整机启动失败**
+> （金丝雀实测，见 [VERIFICATION.md](./VERIFICATION.md) 第 3 节）。`link:` 仅供
+> **源码目录自带完整 node_modules** 的开发迭代；`install.ps1 -Link` /
+> `install.sh --link` 已内置前置自检（缺失即拒绝），请放心使用。
 
 ### 方式二：离线一键脚本（解压发行包后使用）
 
@@ -77,7 +82,7 @@ dsh plugin --profile web add link:/path/to/dsh-reasoning-level
 
 ```powershell
 .\install.ps1              # 安装本目录（file: 快照）
-.\install.ps1 -Link        # 开发模式（link: 直连源码，改代码重启即生效）
+.\install.ps1 -Link        # 开发模式（link: 直连源码，改代码重启即生效；脚本前置自检 node_modules，缺失即拒绝）
 .\install.ps1 -Uninstall   # 卸载
 ```
 
@@ -85,7 +90,7 @@ dsh plugin --profile web add link:/path/to/dsh-reasoning-level
 
 ```sh
 ./install.sh               # 安装本目录
-./install.sh --link        # 开发模式
+./install.sh --link        # 开发模式（link: 直连源码，改代码重启即生效；脚本前置自检 node_modules，缺失即拒绝）
 ./install.sh --uninstall   # 卸载
 ```
 

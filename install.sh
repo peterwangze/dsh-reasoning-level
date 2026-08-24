@@ -94,6 +94,14 @@ node -e "const p=require('$SRC/package.json'); if(!p.dsh?.bundle?.patch) process
 # $DSH_HOME/profiles/node_modules 平坦回退树 → 宿主包 peers 全部
 # ERR_MODULE_NOT_FOUND。必须显式 file:（内容寻址快照）。link: 仅当
 # 源码目录自带完整 node_modules 时可用。
+if [ "$MODE" = "link" ]; then
+  # DOC-001 前置自检：从源码目录实测解析宿主导入面（lib/index.js 顶层
+  # import 的 @deepseek-ai/schemastery / dsh-settings），失败即拒绝并引导
+  # file:——否则 link: 安装会让 DSH 整机启动失败（ERR_MODULE_NOT_FOUND）。
+  if ! (cd "$SRC" && node --input-type=module -e "for (const id of ['@deepseek-ai/schemastery','@deepseek-ai/dsh-settings']) { await import(id) }; console.log('LINK_DEP_OK')" >/dev/null 2>&1); then
+    fail "link 模式要求源码目录自带完整 node_modules（能解析宿主包 peers：@deepseek-ai/schemastery、@deepseek-ai/dsh-settings）。当前源码目录缺少这些依赖——link: 安装会让 DSH 启动失败（ERR_MODULE_NOT_FOUND）。请改用默认的 file: 快照，或先在源码目录安装完整依赖后重试。"
+  fi
+fi
 SPEC="file:$SRC"
 [ "$MODE" = "link" ] && SPEC="link:$SRC"
 step "安装：dsh plugin --profile $PROFILE add $SPEC"

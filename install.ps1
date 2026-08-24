@@ -113,6 +113,32 @@ if (-not $pkg.dsh.bundle.patch) {
 # $DSH_HOME/profiles/node_modules 平坦回退树 → 宿主包 peers 全部
 # ERR_MODULE_NOT_FOUND。必须显式 file:（内容寻址快照，物化在 profile
 # 的 node_modules 下）。link: 仅当源码目录自带完整 node_modules 时可用。
+if ($Link) {
+  # DOC-001 前置自检：link: 必须能从源码目录实测解析插件的宿主导入面
+  # （lib/index.js 顶层 import 的 @deepseek-ai/schemastery / dsh-settings 及其
+  # 传递依赖；dsh-llm 等服务由 DSH 运行时注入，不在导入面），否则 DSH
+  # 整机启动失败。与插件加载同路径的动态 import 实测，而非仅查 node_modules
+  # 是否存在——失败即拒绝并引导 file:。
+  $probeSrc = @'
+for (const id of ['@deepseek-ai/schemastery', '@deepseek-ai/dsh-settings']) {
+  await import(id)
+}
+console.log('LINK_DEP_OK')
+'@
+  $eapPrev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  Push-Location $src
+  try {
+    & node --input-type=module -e $probeSrc 2>&1 | Out-Null
+    $probeOk = ($LASTEXITCODE -eq 0)
+  } finally {
+    $ErrorActionPreference = $eapPrev
+    Pop-Location
+  }
+  if (-not $probeOk) {
+    Write-Fail "link: 模式要求源码目录自带完整 node_modules（能解析宿主包 peers：@deepseek-ai/schemastery、@deepseek-ai/dsh-settings）。当前源码目录缺少这些依赖——link: 安装会让 DSH 启动失败（ERR_MODULE_NOT_FOUND）。请改用默认的 file: 快照，或先在源码目录安装完整依赖后重试。"
+  }
+}
 $spec = if ($Link) { "link:$src" } else { "file:$src" }
 Write-Step "安装：dsh plugin --profile $Profile add $spec"
 dsh plugin --profile $Profile add $spec
