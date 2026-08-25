@@ -1,4 +1,4 @@
-# dsh-reasoning-level 验证协议（v0.7.1）
+# dsh-reasoning-level 验证协议（v0.7.2）
 
 > 本文是「插件不得拖垮宿主」的工程契约：从一次真实事故复盘出发，给出
 > **架构约束（为什么）、实现规约（怎么防）、验证流程（怎么证）** 三层防线。
@@ -75,7 +75,7 @@
     （`[{type:'text', text}]`）——字符串 `content` 会触发适配器
     `content.some is not a function`，这是 v0.6 探测"全部失败"的根因；
   - 探测请求带 `probe: true` 标记，`llm/stream` 旁路统计与注入，观测数据零污染；
-  - 单次探测带 30s 超时（AbortController），单模型并发 3；
+  - 单次探测带 30s 超时（AbortController），单模型并发 3；并发 /probe 同一模型走互斥队列串行化（v0.7.2 MAINT-017——重复点击/双窗口不互相覆盖）；
   - 分类：`UNSUPPORTED_REASONING_EFFORT` → 该次探测结果 rejected 列表（不入黑名单、
     不持久化——探测是"测量"不是调用，v0.7.1 MAINT-013）；真实调用被网关拒绝
     （agent/request-error / 流内 finish error）→ 仅会话内存黑名单（注入跳过，
@@ -83,7 +83,8 @@
   - 固化：实测可用等级写回 `llm-pi-ai` 模型能力声明并持久化 `probeEfforts`
     （重启后不再被生成表升级覆盖）；手写声明保 wire 并入 working 新档位
     （保留用户档位，实测可用的新档位自动追加），本插件生成/未声明的声明
-    替换为 working 集；
+    替换为 working 集；（v0.7.2 MAINT-017：并入语义取代"永不覆盖"，7 键全量
+    声明识别为生成形状——自动升级而非误判手写）
   - 固化写走既有 `settings.replace` 整节替换 + `settings/updated` 收敛路径，
     不新增写面。
 - 安装器（install.ps1 / install.sh）：清理旧残留（只删链接本体）、安装前
