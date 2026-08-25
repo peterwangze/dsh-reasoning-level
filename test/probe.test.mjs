@@ -22,11 +22,12 @@ import { makeCtx, mount, callRoute, statusChunks, blacklistMutates, probeEfforts
 
 const NS = 'llm-reasoning'
 
-test('(a) probeModelLevels：ok/rejected/blocked 分类；拒绝等级仅入结果列表（不入黑名单、不持久化）', async () => {
+test('(a) probeModelLevels：ok/rejected/blocked 分类；拒绝等级仅入结果列表（不入黑名单、不持久化）；MAINT-014 discovery 探测', async () => {
   const reasons = {
     low: { kind: 'stop', failure: null },
     high: { kind: 'error', failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'gateway does not support reasoning effort "high"' } },
     medium: { kind: 'aborted', failure: null },
+    __dsh_discovery__: { kind: 'error', failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'reasoning effort "__dsh_discovery__" is not supported. Valid values: [\'low\',\'medium\',\'high\']' } },
   }
   const probed = []
   const { ctx, state } = makeCtx({
@@ -45,7 +46,8 @@ test('(a) probeModelLevels：ok/rejected/blocked 分类；拒绝等级仅入结�
   assert.equal(r.payload.blocked.join(','), 'medium')
   assert.equal(r.payload.key, 'p/m')
   // MAINT-013：候选不受任何黑名单过滤——每次探测全量重测所有候选等级
-  assert.deepEqual(probed.sort(), ['high', 'low', 'medium'])
+  // MAINT-014：额外包含 discovery 请求（__dsh_discovery__）
+  assert.deepEqual(probed.sort(), ['__dsh_discovery__', 'high', 'low', 'medium'])
   // 拒绝等级仅作为该次探测结果的 rejected 列表返回：零黑名单持久化，内存黑名单为空
   assert.equal(blacklistMutates(state).length, 0)
   const stats = await callRoute(state, '/reasoning-level-stats', {})
@@ -82,20 +84,20 @@ test('(b) applyProbeResults：zai 路由 working 白名单固化 + pin 持久化
   })
   assert.equal(r.code, 200)
   assert.equal(r.payload.writes, 1)
-  // working 白名单：仅 GENERATED_LEVELS ∩ working 且有生成线值的档
-  // （off='disabled'、low='low'；xhigh 无生成线值被滤掉；high 被拒绝不入固化）
-  assert.deepEqual(state.replaceCalls[0].value.providers.zai.models[0].reasoningEfforts, { off: 'disabled', low: 'low' })
+  // MAINT-014：xhigh 不再被 GENERATED_LEVELS 过滤——以等级名自身作为线值固化
+  // （off='disabled'、low='low'、xhigh='xhigh'；high 被拒绝不入固化）
+  assert.deepEqual(state.replaceCalls[0].value.providers.zai.models[0].reasoningEfforts, { off: 'disabled', low: 'low', xhigh: 'xhigh' })
   // pin 持久化：probeEfforts 写入（T1 注释修正——按 R1 §0.5：旧 schema 在本机
   // schemastery 3.18.1 下经 Schema.from(null)→any() 直通，'disabled' 实际能落盘，
   // 代价是线值零校验；并非"校验失败静默不落盘"）
   const pe = probeEffortsMutates(state)
   assert.equal(pe.length, 1)
-  assert.deepEqual(pe[0].ops[0].value, { 'zai/m2': { off: 'disabled', low: 'low' } })
-  // F1：schema 接受含 'disabled' 的 probeEfforts（用真实注册的 Config schema 校验）
+  assert.deepEqual(pe[0].ops[0].value, { 'zai/m2': { off: 'disabled', low: 'low', xhigh: 'xhigh' } })
+  // F1：schema 接受含 'disabled' 与 xhigh 的 probeEfforts（用真实注册的 Config schema 校验）
   const schema = state.schemas.get(NS)
   assert.ok(schema, 'Config schema must be registered')
-  const parsed = schema({ probeEfforts: { 'zai/m2': { off: 'disabled', low: 'low' } } })
-  assert.deepEqual(parsed.probeEfforts, { 'zai/m2': { off: 'disabled', low: 'low' } })
+  const parsed = schema({ probeEfforts: { 'zai/m2': { off: 'disabled', low: 'low', xhigh: 'xhigh' } } })
+  assert.deepEqual(parsed.probeEfforts, { 'zai/m2': { off: 'disabled', low: 'low', xhigh: 'xhigh' } })
 })
 
 test('(d) F1 回归：probeEfforts 值 schema = string|null（接受 disabled/null，拒绝非字符串）', async () => {
@@ -178,4 +180,141 @@ test('(e) F2 回归：replace 失败不产生 pin 分叉；重试成功时 repla
   assert.equal(r2.payload.writes, 1)
   const order = state.events.slice(-2)
   assert.deepEqual(order, ['replace:llm-pi-ai', 'mutate:' + NS])
+})
+
+// ── MAINT-014：探测等级发现增强 ──────────────────────────────────────────────
+
+test('MAINT-014: discovery 解析网关拒绝响应中的 valid-values 列表，非标准档进入候选', async () => {
+  // 模型无目录声明，discovery 返回 valid values 含非标准档 'ultra'
+  const probed = []
+  const { ctx, state } = makeCtx({
+    nsConfig: { enabled: false, statsPublic: true },
+    resolveModelInfo: async () => undefined,
+    stream: (opts) => {
+      probed.push(opts.reasoningEffort)
+      if (opts.reasoningEffort === '__dsh_discovery__') {
+        return statusChunks({
+          kind: 'error',
+          failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'reasoning effort "__dsh_discovery__" is not supported. Valid values: [\'low\',\'medium\',\'high\',\'ultra\']' },
+        })(opts)
+      }
+      return statusChunks({ kind: 'stop', failure: null })(opts)
+    },
+  })
+  await mount(ctx)
+  const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'p', model: 'm' })
+  assert.equal(r.code, 200)
+  // discovery 发现的 'ultra' 必须出现在候选结果中（不过 LEVELS 过滤）
+  assert.ok(r.payload.working.includes('ultra'), 'discovery-found ultra must be in working')
+  assert.ok(r.payload.working.includes('low'), 'standard level low must also be in working')
+  assert.ok(r.payload.working.includes('high'), 'standard level high must also be in working')
+  assert.ok(r.payload.working.includes('medium'), 'standard level medium must also be in working')
+  // discovery 请求本身应在探测中出现
+  assert.ok(probed.includes('__dsh_discovery__'), 'discovery probe must be issued')
+})
+
+test('MAINT-014: discovery 无有效等级列表时回退现有候选逻辑（不导致探测整体失败）', async () => {
+  const probed = []
+  const { ctx, state } = makeCtx({
+    nsConfig: { enabled: false, statsPublic: true },
+    resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } }),
+    stream: (opts) => {
+      probed.push(opts.reasoningEffort)
+      if (opts.reasoningEffort === '__dsh_discovery__') {
+        // 错误但不含可解析的等级列表
+        return statusChunks({
+          kind: 'error',
+          failure: { code: 'INTERNAL_ERROR', message: 'internal server error' },
+        })(opts)
+      }
+      return statusChunks({ kind: 'stop', failure: null })(opts)
+    },
+  })
+  await mount(ctx)
+  const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'p', model: 'm' })
+  assert.equal(r.code, 200)
+  // 回退到目录声明：low、high 可用
+  assert.deepEqual(r.payload.working.sort(), ['high', 'low'])
+  assert.equal(r.payload.error, undefined)
+  assert.ok(probed.includes('__dsh_discovery__'), 'discovery probe was attempted')
+})
+
+test('MAINT-014: resolveModelInfo 返回的非标准档不被 LEVELS 过滤丢弃', async () => {
+  const probed = []
+  const { ctx, state } = makeCtx({
+    nsConfig: { enabled: false, statsPublic: true },
+    resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low' }, { id: 'high' }, { id: 'ultra' }] } }),
+    stream: (opts) => {
+      probed.push(opts.reasoningEffort)
+      if (opts.reasoningEffort === '__dsh_discovery__') {
+        // discovery 无有用信息，不干扰测试
+        return statusChunks({
+          kind: 'error',
+          failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'no' },
+        })(opts)
+      }
+      return statusChunks({ kind: 'stop', failure: null })(opts)
+    },
+  })
+  await mount(ctx)
+  const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'p', model: 'm' })
+  assert.equal(r.code, 200)
+  // LEVELS 过滤已移除（MAINT-014）：resolveModelInfo 声明的 'ultra' 应进入候选
+  assert.ok(r.payload.working.includes('ultra'), 'ultra from resolveModelInfo must not be filtered by LEVELS')
+  assert.ok(r.payload.working.includes('low'))
+  assert.ok(r.payload.working.includes('high'))
+})
+
+test('MAINT-014: applyProbeResults 固化非标准 working 等级（线值=等级名自身）', async () => {
+  const piAi = { providers: { gateway: { api: 'openai-completions', models: [{ id: 'm4' }] } } }
+  const { ctx, state } = makeCtx({
+    nsConfig: { enabled: false, statsPublic: true },
+    piAiSection: piAi,
+  })
+  await mount(ctx)
+  const r = await callRoute(state, '/reasoning-level-stats/probe/apply', {
+    results: [{ provider: 'gateway', model: 'm4', working: ['off', 'low', 'ultra', 'custom'], rejected: [], blocked: [] }],
+  })
+  assert.equal(r.code, 200)
+  assert.equal(r.payload.writes, 1)
+  // 标准档使用生成线值（off->disabled 因 openai-completions 非 zai/deepseek 路由 → null）；
+  // 非标准档 ultra/custom 以等级名自身为线值
+  assert.deepEqual(state.replaceCalls[0].value.providers.gateway.models[0].reasoningEfforts, {
+    off: null,
+    low: 'low',
+    ultra: 'ultra',
+    custom: 'custom',
+  })
+  // probeEfforts 持久化同样含非标准档
+  const pe = probeEffortsMutates(state)
+  assert.equal(pe.length, 1)
+  assert.deepEqual(pe[0].ops[0].value, { 'gateway/m4': { off: null, low: 'low', ultra: 'ultra', custom: 'custom' } })
+})
+
+test('MAINT-014: discovery 发现级与目录声明并集——目录声明标准档+discovery 非标准档共存', async () => {
+  const probed = []
+  const { ctx, state } = makeCtx({
+    nsConfig: { enabled: false, statsPublic: true },
+    resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } }),
+    stream: (opts) => {
+      probed.push(opts.reasoningEffort)
+      if (opts.reasoningEffort === '__dsh_discovery__') {
+        return statusChunks({
+          kind: 'error',
+          failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'reasoning effort "__dsh_discovery__" is not supported. Available: low, high, ultra, turbo.' },
+        })(opts)
+      }
+      return statusChunks({ kind: 'stop', failure: null })(opts)
+    },
+  })
+  await mount(ctx)
+  const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'p', model: 'm' })
+  assert.equal(r.code, 200)
+  // 目录声明贡献 low、high（LEVELS 保留过滤）
+  // discovery 贡献 ultra、turbo（不过 LEVELS）
+  assert.ok(r.payload.working.includes('low'), 'standard low from directory')
+  assert.ok(r.payload.working.includes('high'), 'standard high from directory')
+  assert.ok(r.payload.working.includes('ultra'), 'non-standard ultra from discovery')
+  assert.ok(r.payload.working.includes('turbo'), 'non-standard turbo from discovery')
+  assert.ok(probed.includes('__dsh_discovery__'), 'discovery probe was issued')
 })
