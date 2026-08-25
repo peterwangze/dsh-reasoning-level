@@ -81,7 +81,9 @@
     （agent/request-error / 流内 finish error）→ 仅会话内存黑名单（注入跳过，
     不持久化，重启清零）；限流/超时 → blocked（不黑名单，不误判）；
   - 固化：实测可用等级写回 `llm-pi-ai` 模型能力声明并持久化 `probeEfforts`
-    （重启后不再被生成表升级覆盖）；用户手写的声明永远跳过；
+    （重启后不再被生成表升级覆盖）；手写声明保 wire 并入 working 新档位
+    （保留用户档位，实测可用的新档位自动追加），本插件生成/未声明的声明
+    替换为 working 集；
   - 固化写走既有 `settings.replace` 整节替换 + `settings/updated` 收敛路径，
     不新增写面。
 - 安装器（install.ps1 / install.sh）：清理旧残留（只删链接本体）、安装前
