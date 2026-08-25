@@ -10,6 +10,10 @@
  * probeLevelOnce -> llm.stream 等）。ctx.on 记录事件处理器（agent/request、
  * agent/request-error、llm/stream），测试可驱动真实钩子路径（MAINT-013
  * 自愈黑名单仅内存态验证）。
+ *
+ * MAINT-017 增强：settings.replace 更新 state.piAiSection 以支持临时声明
+ * 机制的校验语义模拟；validatingStream 辅助函数提供符合真实 DSH 校验行为的
+ * llm.stream 桩——在 effort 不在模型声明时抛出 UNSUPPORTED_REASONING_EFFORT。
  */
 import { register } from 'node:module'
 import { EventEmitter } from 'node:events'
@@ -36,7 +40,7 @@ export function makeCtx(options = {}) {
   const piAiSection = clone(options.piAiSection)
   const state = {
     nsConfig,
-    piAiSection,
+    piAiSection, // replaced replace 时同步更新（供 validatingStream 读取当前声明）
     routes: new Map(), // path -> handler
     schemas: new Map(), // ns -> registered schema
     replaceCalls: [], // { ns, value }
@@ -50,7 +54,7 @@ export function makeCtx(options = {}) {
     },
     describe() {
       return [
-        { ns: 'llm-pi-ai', user: clone(piAiSection) },
+        { ns: 'llm-pi-ai', user: clone(state.piAiSection) },
         { ns: 'llm-reasoning', user: clone(nsConfig) },
         { ns: 'llm-deepseek', user: undefined },
         { ns: 'agent-default-model', user: undefined },
@@ -58,7 +62,7 @@ export function makeCtx(options = {}) {
     },
     get(ns) {
       if (ns === 'llm-reasoning') return nsConfig
-      if (ns === 'llm-pi-ai') return piAiSection ?? {}
+      if (ns === 'llm-pi-ai') return state.piAiSection ?? {}
       return undefined
     },
     mutate(ns, ops) {
@@ -69,7 +73,18 @@ export function makeCtx(options = {}) {
     replace(ns, value) {
       state.replaceCalls.push({ ns, value })
       state.events.push('replace:' + ns)
-      return Promise.resolve(options.replaceImpl ? options.replaceImpl(ns, value) : undefined)
+      const promise = options.replaceImpl ? options.replaceImpl(ns, value) : undefined
+      if (ns === 'llm-pi-ai') {
+        // 仅在 replaceImpl 未抛出时更新 piAiSection（若抛出则保留原值）
+        return Promise.resolve(promise).then(() => {
+          state.piAiSection = clone(value)
+        }).catch((error) => {
+          state.replaceCalls.pop() // 移除失败记录
+          state.events.pop()
+          throw error
+        })
+      }
+      return Promise.resolve(promise)
     },
   }
   const llm = {
@@ -168,4 +183,52 @@ export function blacklistMutates(state) {
 
 export function probeEffortsMutates(state) {
   return state.mutateCalls.filter((c) => JSON.stringify(c.ops[0]?.path) === '["probeEfforts"]')
+}
+
+/** 读取 llm-pi-ai 中某模型的当前 reasoningEfforts（从 state.piAiSection 实时取）。 */
+export function getModelReasoningEfforts(state, provider, model) {
+  const piAi = state.piAiSection
+  if (piAi === undefined) return undefined
+  const profile = piAi.providers !== undefined ? piAi.providers[provider] : undefined
+  if (profile === undefined || !Array.isArray(profile.models)) return undefined
+  const entry = profile.models.find((m) => m.id === model)
+  return entry !== undefined ? entry.reasoningEfforts : undefined
+}
+
+/** 筛选指定命名空间的 replace 调用。 */
+export function replaceCallsFor(ns, state) {
+  return state.replaceCalls.filter((c) => c.ns === ns)
+}
+
+/**
+ * 创建模拟 DSH 校验行为的 llm.stream 桩：检查 reasoningEffort 是否在模型声明内，
+ * 不在则抛出 UNSUPPORTED_REASONING_EFFORT（模拟 resolveCallWithInfo 本地校验）。
+ * behaviors 映射 effort -> finish reason；缺省 behavior 的 effort 返回 { stop }。
+ *
+ * 用于 MAINT-017 临时声明机制测试——断言"声明外档不通过校验"的真实语义。
+ *
+ * stateOrGetter 可以是 state 对象，也可以是返回 state 的函数（用于 state 在
+ * makeCtx 之后才可用的场景：先传递 getter，makeCtx 返回后赋值 state）。
+ */
+export function validatingStream(stateOrGetter, behaviors = {}) {
+  const getState = typeof stateOrGetter === 'function' ? stateOrGetter : () => stateOrGetter
+  return async function* (opts) {
+    const state = getState()
+    const effort = opts.reasoningEffort
+    // 从 state.piAiSection 读取当前声明
+    const decl = getModelReasoningEfforts(state, opts.provider, opts.model)
+    const declLevels = decl !== undefined ? Object.keys(decl) : []
+    if (effort !== undefined && declLevels.length > 0 && !declLevels.includes(effort)) {
+      throw Object.assign(
+        new Error(`reasoning effort "${effort}" is not supported by this model`),
+        { code: 'UNSUPPORTED_REASONING_EFFORT' }
+      )
+    }
+    const behavior = behaviors[effort]
+    if (behavior !== undefined) {
+      yield { type: 'finish', reason: behavior }
+    } else {
+      yield { type: 'finish', reason: { kind: 'stop', failure: null } }
+    }
+  }
 }
