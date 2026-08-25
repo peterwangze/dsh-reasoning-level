@@ -1,6 +1,6 @@
 ## Governance Bootstrap（强制 — 每次会话第一动作）
 
-> @bootstrap-version: 0.76.0（模板最低引导版本——低于 SKILL frontmatter active_version 即陈旧，先升级本段再继续）
+> @bootstrap-version: 0.77.0（模板最低引导版本——低于 SKILL frontmatter active_version 即陈旧，先升级本段再继续）
 
 **⚡ SELF-CHECK（在任何输出之前先问自己）**：
 1. 我是否已经读了 `.governance/plan-tracker.md`？否 → **立即停止，先去读**
@@ -175,11 +175,11 @@
 
 ```
 ❌ 禁止：直接修改 平台原生入口文件 添加新行为
-         → 改了用户得不到——狗粮实例不是事实源
+        → 改了用户得不到——狗粮实例不是事实源
 
 ✅ 强制：commands/governance-init.md Step 7 注入模板 → bump 版本 →
-        用户 /plugin update → bootstrap 自升级 → 本仓库 平台原生入口文件 同步
-         → 模板是唯一事实源，用户通过插件更新获得
+       用户 /plugin update → bootstrap 自升级 → 本仓库 平台原生入口文件 同步
+        → 模板是唯一事实源，用户通过插件更新获得
 ```
 
 **MUST NOT** 直接修改本文件来添加新行为。**MUST** 先改 `commands/governance-init.md` Step 7（canonical source），bump 版本。本文件是狗粮实例——修改它只影响本仓库，用户拿不到。
