@@ -4,18 +4,23 @@
  *  - not-in-pi-ai-config / already-verified：apply 的 skipped 分支；
  *  - 空 results / 空 body（400）不崩溃；
  *  - R1 §2 提及的 /test 端点成功路径（此前无覆盖）。
+ *
+ * MAINT-017：err-1 使用不存在的等级过滤候选（候选底集=词汇表全量，不存在即空）；
+ * err-3 调整已校验判定（生成形状声明→替换语义，wire 映射一致）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { makeCtx, mount, callRoute, statusChunks, blacklistMutates, probeEffortsMutates } from './harness.mjs'
 
-test('(err-1) probe：candidates 被 levels 过滤为空 → error "no candidate levels"，零黑名单写入', async () => {
+test('(err-1) probe：candidates 被 levels 过滤为空（过滤不存在的等级）→ error "no candidate levels"，零黑名单写入', async () => {
   const { ctx, state } = makeCtx({
     nsConfig: { enabled: false, statsPublic: true },
     resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low' }] } }),
   })
   await mount(ctx)
-  const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'p', model: 'm', levels: ['high'] })
+  // 候选底集 = 词汇表 7 档 + resolveInfo [low]
+  // 用不存在的等级过滤 → 候选为空
+  const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'p', model: 'm', levels: ['nonexistent'] })
   assert.equal(r.code, 200)
   assert.equal(r.payload.error, 'no candidate levels')
   assert.deepEqual(r.payload.working, [])
@@ -47,6 +52,7 @@ test('(err-3) apply：工作等级与既有生成形状声明一致 → skipped 
     piAiSection: { providers: { gateway: { api: 'openai-completions', models: [{ id: 'm1', reasoningEfforts: generated }] } } },
   })
   await mount(ctx)
+  // working 与生成形状一致 → 替换后判断深相等 → already-verified
   const r = await callRoute(state, '/reasoning-level-stats/probe/apply', {
     results: [{ key: 'gateway/m1', provider: 'gateway', model: 'm1', working: ['off', 'minimal', 'low', 'medium', 'high', 'max'], rejected: [], blocked: [] }],
   })

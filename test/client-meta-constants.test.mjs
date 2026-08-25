@@ -36,7 +36,7 @@ test('(N1) 客户端 probe 抓取超时 ≥ 服务端单模型最坏时长+5s �
   const clientTimeout = extractNumber(clientSrc, 'PROBE_FETCH_TIMEOUT_MS')
   const serverTimeout = extractNumber(indexSrc, 'PROBE_TIMEOUT_MS')
   const concurrency = extractNumber(indexSrc, 'PROBE_CONCURRENCY')
-  const levelCeiling = extractArray(indexSrc, 'LEVELS').length
+  const levelCeiling = extractArray(indexSrc, 'THINKING_LEVEL_VOCABULARY').length
   const waves = Math.ceil(levelCeiling / concurrency)
   const requirement = waves * serverTimeout + 5000
   assert.ok(
