@@ -22,14 +22,18 @@
 `harness.mjs` 提供最小 stub ctx（settings 的 register/describe/get/mutate/replace、
 llm 的 stream/resolveModelInfo、webServer.register 捕获、logger/effect/on/timeout），
 调用真实 `apply(ctx)` 后向捕获的路由处理器投递模拟 req/res——与真实运行共用
-`parseProbeInput -> probeModelLevels -> probeLevelOnce -> markRejected ->
-persistBlacklist/hydrateBlacklist/applyProbeResults` 全部执行路径。
+`parseProbeInput -> probeModelLevels -> probeLevelOnce -> llm.stream ->
+applyProbeResults` 全部执行路径；`ctx.on` 记录事件处理器，测试可驱动真实钩子
+路径（MAINT-013 自愈黑名单仅内存态：真实调用拒绝 → 注入跳过 → 探测重置）。
 
-## 覆盖（DEV-002 a-e + F1/F2 回归 + DEV-003 新增）
+## 覆盖（DEV-002 a-e + F1/F2 回归 + DEV-003 新增 + MAINT-013）
 
-- `probe.test.mjs`（a）分类 ok/rejected=UNSUPPORTED/blocked=aborted + 拒绝入黑名单持久化；
+- `probe.test.mjs`（a）分类 ok/rejected=UNSUPPORTED/blocked=aborted；候选全量重测
+  （不受黑名单过滤）；拒绝等级仅作为该次探测结果返回（不入黑名单、不持久化）；
 - （b）用户手写声明跳过；working 白名单固化 + pin 持久化（含 'disabled' wire 值经 schema 校验）；
-- （c）hydrateBlacklist/persistBlacklist 幂等合并（去重、相同值不重复写）；
+- （c）MAINT-013：持久化 probeBlacklist 兼容保留（boot 不装载，零数据破坏）；
+  真实调用拒绝仅会话内存黑名单（注入跳过、零持久化）；/probe 起始重置该模型
+  黑名单 → 注入恢复；探测拒绝不入黑名单；
 - （d）F1 回归：probeEfforts 值 schema = string|null（接受 'disabled'/null，拒绝非字符串）；
 - （e）F2 回归：replace 失败无 pin 分叉、成功时 replace 先于 probeEfforts 持久化；
 - `gate-access.test.mjs` 403 门控：非回环 + statsPublic=false 拒绝（stats/probe/test/apply），

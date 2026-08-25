@@ -27,17 +27,17 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 - DeepSeek 官方路由同步（`llm-deepseek.reasoningEffort`，取 off/low/high/max）
 - 模型级默认：`models: {"provider/model": level}`，界面按模型实测能力过滤可选项、探测结果标注、独立删除按钮
 - **全路径注入**（v0.3.0）：模型级默认不只对 agent-loop 会话生效——router 子代理 / session-title / compaction 等手建调用同样注入（`llm/stream` 未冻结请求注入）
-- **自愈降级**（v0.3.0）：网关实测拒绝某等级（`UNSUPPORTED_REASONING_EFFORT`）自动记入黑名单，后续注入跳过，设置页明示
+- **自愈降级**（v0.3.0）：网关实测拒绝某等级（`UNSUPPORTED_REASONING_EFFORT`）自动记入黑名单，后续注入跳过，设置页明示（仅当前会话内存态，重启清零，不写入 settings.yaml）
 - **统计增强**（v0.3.0）：每次调用耗时、流内思考字符近似（网关不回报 reasoning_tokens 时仍可观测思考量）、来源（sessionId/purpose）
 - **同步默认 agent 模型**（v0.3.0）：`syncDefaultAgent` 开启时全局等级变化同步写 `agent-default-model.reasoningEffort`
 - **统计持久化**（v0.3.0）：聚合数据落盘 `$DSH_HOME/storages/reasoning-level-stats.json`，重启后恢复
 - **端点访问控制**（v0.4.0）：统计端点默认仅回环 Host 可读；LAN 部署需显式 `statsPublic: true`
 - **off 线值按协议细化**（v0.4.0）：zai/deepseek thinking 格式下 off 显式发送 `disabled`（默认开启思考的模型真正关闭），openai 系缺省
 - **purpose 级默认**（v0.4.0）：`purposes.compaction` / `purposes.session-title` 独立等级（辅助调用可用 off 省 token）
-- **实测按钮**（v0.4.0）：统计面板发 1-token 请求验证某模型某等级实际可用，网关拒绝自动入黑名单
-- **一键探测并固化配置**（v0.7.0）：统计面板**一个按钮**探测全部模型的全部候选等级——实测可用的等级自动写回模型能力声明、实测拒绝的等级入黑名单（两级配置都持久化，重启生效）；限流/超时等错误与"等级不可用"严格区分，不再误判
+- **实测按钮**（v0.4.0）：统计面板发 1-token 请求验证某模型某等级实际可用；网关拒绝仅作为该次探测的拒绝结果返回，不入黑名单（探测是"测量"不是调用）
+- **一键探测并固化配置**（v0.7.0）：统计面板**一个按钮**探测全部模型的全部候选等级——实测可用的等级自动写回模型能力声明并持久化；实测拒绝的等级仅作为该次探测结果的拒绝列表返回（不入黑名单、不跨次生效）；每次探测全量重测全部候选等级，历史误判不会卡死后续探测；限流/超时等错误与"等级不可用"严格区分，不再误判
 - **探测可用性修复**（v0.7.0）：修复 v0.4 以来探测"全部显示失败"的根因——测试请求的 `Message.content` 必须是 ContentBlock 数组，旧代码传字符串导致适配器在组装阶段就报 `content.some is not a function`（与模型是否支持等级无关）；探测请求标记旁路统计（不污染观测数据），单次 30s 超时、单模型并发 3，探测中的请求全部带 `probe` 标记免污染
-- **黑名单/能力声明持久化**（v0.7.0）：`llm-reasoning.probeBlacklist`（实测拒绝等级）与 `llm-reasoning.probeEfforts`（实测能力声明）落盘 settings.yaml，重启后不再被生成表覆盖/升级，实测结果即真值；用户手写的模型声明永不被探测覆盖
+- **能力声明持久化**（v0.7.0）：`llm-reasoning.probeEfforts`（实测能力声明）落盘 settings.yaml，重启后不再被生成表覆盖/升级，实测结果即真值；用户手写的模型声明永不被探测覆盖。（v0.7.1 起黑名单改为仅当前会话内存态：`probeBlacklist` 字段兼容保留，不再写入也不再作为过滤依据——每次探测全量重测，历史误判不跨次生效，既有数据零破坏）
 - **CSV 导出 + 建议列**（v0.4.0）：统计一键导出 CSV；聚合表显示错误率/实测拒绝建议
 - **i18n 基础**（v0.5.0）：client 接入 locale（zh/en 标题与区块）
 - **事故加固**（v0.6.0，[VERIFICATION.md](./VERIFICATION.md)）：`dependencies` 清零、宿主包全 peer（`*`）对齐 DSH out-of-tree 官方契约；安装全面改走 `dsh plugin` 通道（不再 junction 共享树/手改 patch/写 settings）；全部注册与钩子失败就地降级，绝不允许升级为 DSH 启动失败；修复设置页统计面板 `t is not defined` 渲染崩溃；新增渲染冒烟测试与依赖策略 CI 门禁
@@ -116,7 +116,7 @@ dsh plugin --profile web add file:/path/to/dsh-reasoning-level     # 再重新�
 |---|---|
 | 全局开关 + 默认等级 | 总开关（`enabled`）与全局默认等级（`level`） |
 | 模型级默认 | 按 `provider/model` 覆盖全局默认；下拉只列**该模型实测支持**的等级，模型名旁标注支持列表，每行有删除按钮 |
-| 实时调用统计 | 每次调用的实际等级/思考 tokens/输出/结束原因 + 按模型聚合（等级分布）；顶部**一键探测全部模型并固化配置**——逐模型实测全部候选等级（1-token），可用等级写回能力声明、拒绝等级入黑名单 |
+| 实时调用统计 | 每次调用的实际等级/思考 tokens/输出/结束原因 + 按模型聚合（等级分布）；顶部**一键探测全部模型并固化配置**——逐模型实测全部候选等级（1-token），可用等级写回能力声明、拒绝等级在结果中标注 |
 | 状态行 | 已应用路由/模型数、DeepSeek 官方默认 |
 
 ### 2. 推荐上手路径
@@ -148,12 +148,12 @@ llm-reasoning:
     session-title: off
   syncDefaultAgent: false  # true = 全局等级变化同步 agent-default-model.reasoningEffort
   statsPublic: false       # true = 统计端点允许 LAN 访问（默认仅回环）
-  # 以下两项由「一键探测」自动维护，一般无需手改：
-  probeBlacklist: {}       # provider/model -> 网关实测拒绝的等级（注入跳过）
+  # 以下两项由「一键探测」自动维护（probeBlacklist 为 v0.7.1 前版本遗留，兼容保留不再使用）：
+  probeBlacklist: {}       # 兼容保留：不再写入/读取（黑名单仅当前会话内存态）
   probeEfforts: {}         # provider/model -> 实测能力声明（不被生成表升级覆盖）
 ```
 
-> ⚠️ **安全警示（v0.7.0）**：`statsPublic: true` 时统计端点允许 LAN 访问，**新增的 `/reasoning-level-stats/probe` 与 `/reasoning-level-stats/probe/apply` 端点随之开放**——LAN 内任何设备无需认证即可触发 1-token 实测请求（产生 LLM 成本），并可写入模型能力声明与 `probeBlacklist`/`probeEfforts` 配置。默认请保持回环（`statsPublic: false`）；确需 LAN 暴露时请先在可信网络中评估风险。
+> ⚠️ **安全警示（v0.7.0）**：`statsPublic: true` 时统计端点允许 LAN 访问，**新增的 `/reasoning-level-stats/probe` 与 `/reasoning-level-stats/probe/apply` 端点随之开放**——LAN 内任何设备无需认证即可触发 1-token 实测请求（产生 LLM 成本），并可写入模型能力声明与 `probeEfforts` 配置。默认请保持回环（`statsPublic: false`）；确需 LAN 暴露时请先在可信网络中评估风险。
 
 插件运行时自动维护：`llm-pi-ai.providers.<route>.models[].reasoningEfforts`（能力声明，含旧版自动升级）、`llm-pi-ai.providers.<route>.reasoning`（路由默认）、`llm-deepseek.reasoningEffort`。
 

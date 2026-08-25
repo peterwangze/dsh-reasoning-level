@@ -4,7 +4,7 @@
  *  1) probeLevelOnce 以 30000ms 挂载 AbortController 中止定时器
  *     （捕获 globalThis.setTimeout 调用，不做真实等待）；
  *  2) 触发定时器 → llm.stream 经 signal 被中止 → 分类为 blocked（而非 rejected），
- *     不写入黑名单（只有 UNSUPPORTED_REASONING_EFFORT 语义才入黑名单）。
+ *     不写入黑名单（MAINT-013：探测路径任何拒绝都不入黑名单，只进结果列表）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

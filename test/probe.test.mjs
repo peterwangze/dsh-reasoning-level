@@ -1,10 +1,15 @@
 /**
  * DEV-002 F8 最小回归测试：v0.7.0 一键探测/固化核心逻辑。
+ * MAINT-013（0.7.1）：黑名单语义修正——探测拒绝仅作为该次探测结果的 rejected
+ * 列表返回，不入黑名单、不持久化；持久化 probeBlacklist 兼容保留但不再装载；
+ * 真实调用拒绝经自愈仅入会话内存黑名单；/probe 探测开始即重置该模型黑名单。
  *
  * 覆盖（对应 R0 报告 F8 建议用例 a-d）：
  *  (a) probeModelLevels 分类：ok / rejected(UNSUPPORTED_REASONING_EFFORT) / blocked(aborted)；
+ *      候选全量重测、拒绝等级不入黑名单（零持久化、内存黑名单仍为空）；
  *  (b) applyProbeResults：用户手写声明跳过、working 白名单、pin 台账；
- *  (c) persistBlacklist / hydrateBlacklist：幂等合并（去重、相同值不再写）；
+ *  (c) MAINT-013：持久化 probeBlacklist 不装载；真实调用拒绝仅内存态（注入跳过）；
+ *      /probe 起始重置该模型黑名单 → 注入恢复；探测拒绝不入黑名单；
  *  (d) F1 回归：probeEfforts 值 schema 显式 string|null，含 'disabled' 的 wire 值
  *      通过校验、非字符串被拒绝（旧版 z.union([...LEVELS, null]) 经
  *      Schema.from(null) → any() 直通，任意线值都能落盘——见 R1 §0.5）；
@@ -17,16 +22,20 @@ import { makeCtx, mount, callRoute, statusChunks, blacklistMutates, probeEfforts
 
 const NS = 'llm-reasoning'
 
-test('(a) probeModelLevels：ok/rejected/blocked 分类，拒绝等级入黑名单并持久化', async () => {
+test('(a) probeModelLevels：ok/rejected/blocked 分类；拒绝等级仅入结果列表（不入黑名单、不持久化）', async () => {
   const reasons = {
     low: { kind: 'stop', failure: null },
     high: { kind: 'error', failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'gateway does not support reasoning effort "high"' } },
     medium: { kind: 'aborted', failure: null },
   }
+  const probed = []
   const { ctx, state } = makeCtx({
     nsConfig: { enabled: false, statsPublic: true },
     resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low' }, { id: 'high' }, { id: 'medium' }] } }),
-    stream: (opts) => statusChunks(reasons[opts.reasoningEffort])(opts),
+    stream: (opts) => {
+      probed.push(opts.reasoningEffort)
+      return statusChunks(reasons[opts.reasoningEffort])(opts)
+    },
   })
   await mount(ctx)
   const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'p', model: 'm' })
@@ -35,11 +44,12 @@ test('(a) probeModelLevels：ok/rejected/blocked 分类，拒绝等级入黑名�
   assert.equal(r.payload.rejected.join(','), 'high')
   assert.equal(r.payload.blocked.join(','), 'medium')
   assert.equal(r.payload.key, 'p/m')
-  // 拒绝等级 -> markRejected -> persistBlacklist（settings.mutate set probeBlacklist）
-  const bl = blacklistMutates(state)
-  assert.equal(bl.length, 1)
-  assert.deepEqual(bl[0].ops[0].path, ['probeBlacklist'])
-  assert.deepEqual(bl[0].ops[0].value, { 'p/m': ['high'] })
+  // MAINT-013：候选不受任何黑名单过滤——每次探测全量重测所有候选等级
+  assert.deepEqual(probed.sort(), ['high', 'low', 'medium'])
+  // 拒绝等级仅作为该次探测结果的 rejected 列表返回：零黑名单持久化，内存黑名单为空
+  assert.equal(blacklistMutates(state).length, 0)
+  const stats = await callRoute(state, '/reasoning-level-stats', {})
+  assert.deepEqual(stats.payload.blacklist, {})
 })
 
 test('(b) applyProbeResults：用户手写声明跳过，不写回、不 replace', async () => {
@@ -105,22 +115,43 @@ test('(d) F1 回归：probeEfforts 值 schema = string|null（接受 disabled/nu
   assert.throws(() => schema({ probeEfforts: { 'zai/m2': { off: 123 } } }))
 })
 
-test('(c) hydrateBlacklist + persistBlacklist：幂等合并（去重、相同值不再写）', async () => {
+test('(c) MAINT-013：持久化 probeBlacklist 兼容保留不装载；真实调用拒绝仅内存态；探测起始重置黑名单', async () => {
   const { ctx, state } = makeCtx({
-    nsConfig: { enabled: false, statsPublic: true, probeBlacklist: { 'a/b': ['low'] } },
-    resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'high' }] } }),
-    stream: (opts) => statusChunks({ kind: 'error', failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'no reasoning effort "high"' } })(opts),
+    nsConfig: { enabled: true, statsPublic: true, probeBlacklist: { 'a/b': ['low'] }, models: { 'a/b': 'high' } },
+    resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } }),
+    stream: (opts) => statusChunks(opts.reasoningEffort === 'high'
+      ? { kind: 'stop', failure: null }
+      : { kind: 'error', failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'no reasoning effort "low"' } })(opts),
   })
   await mount(ctx)
-  const r1 = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'a', model: 'b' })
-  assert.equal(r1.payload.rejected.join(','), 'high')
-  // hydrate（启动恢复 ['low']）与实测拒绝 'high' 合并持久化，无重复
-  const bl = blacklistMutates(state)
-  assert.equal(bl.length, 1)
-  assert.deepEqual(bl[0].ops[0].value, { 'a/b': ['high', 'low'] })
-  // 再次拒绝同一等级：sets 去重，不重复持久化（幂等）
-  await callRoute(state, '/reasoning-level-stats/probe', { provider: 'a', model: 'b' })
-  assert.equal(blacklistMutates(state).length, 1)
+  const statsBlacklist = async () => (await callRoute(state, '/reasoning-level-stats', {})).payload.blacklist
+  // boot 不装载持久化黑名单：settings 中既有 probeBlacklist {'a/b': ['low']} 被忽略
+  // （兼容保留、零数据破坏），内存黑名单为空
+  assert.deepEqual(await statsBlacklist(), {})
+
+  // 真实调用被网关拒绝 → 自愈降级：仅会话内存态标记（注入跳过），零持久化
+  const onError = state.handlers.get('agent/request-error')
+  assert.ok(onError, 'agent/request-error handler must be registered')
+  await onError({ provider: 'a', agent: { options: { model: 'b' } }, failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'reasoning effort "high"' } }, async () => {})
+  assert.deepEqual(await statsBlacklist(), { 'a/b': ['high'] })
+  assert.equal(blacklistMutates(state).length, 0)
+
+  // 注入路径（agent/request）：黑名单等级被跳过（自愈仍生效）
+  const onRequest = state.handlers.get('agent/request')
+  assert.ok(onRequest, 'agent/request handler must be registered')
+  const cfg1 = await onRequest({}, async () => ({ provider: 'a', model: 'b', maxTokens: 1 }))
+  assert.equal(cfg1.reasoningEffort, undefined)
+
+  // /probe：探测开始即重置该 provider/model 的既有黑名单 → 全量重测
+  const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'a', model: 'b' })
+  assert.deepEqual(r.payload.working, ['high'])
+  assert.deepEqual(r.payload.rejected, ['low'])
+  // 探测中的拒绝不入黑名单（测量不是调用）：探测后内存黑名单为空、零持久化
+  assert.deepEqual(await statsBlacklist(), {})
+  assert.equal(blacklistMutates(state).length, 0)
+  // 重置后注入恢复：同一等级再次可注入
+  const cfg2 = await onRequest({}, async () => ({ provider: 'a', model: 'b', maxTokens: 1 }))
+  assert.equal(cfg2.reasoningEffort, 'high')
 })
 
 test('(e) F2 回归：replace 失败不产生 pin 分叉；重试成功时 replace 先于 probeEfforts 持久化', async () => {

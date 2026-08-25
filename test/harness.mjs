@@ -7,7 +7,9 @@
  * webServer register 捕获 + logger/effect/on/timeout 空实现）调用真实 apply，
  * 再向捕获的处理器投递模拟 req/res（EventEmitter + 捕获 writeHead/end），
  * 与真实运行完全同一执行路径（parseProbeInput -> probeModelLevels ->
- * probeLevelOnce -> llm.stream -> markRejected -> persistBlacklist 等）。
+ * probeLevelOnce -> llm.stream 等）。ctx.on 记录事件处理器（agent/request、
+ * agent/request-error、llm/stream），测试可驱动真实钩子路径（MAINT-013
+ * 自愈黑名单仅内存态验证）。
  */
 import { register } from 'node:module'
 import { EventEmitter } from 'node:events'
@@ -40,6 +42,7 @@ export function makeCtx(options = {}) {
     replaceCalls: [], // { ns, value }
     mutateCalls: [], // { ns, ops }
     events: [], // 'replace:<ns>' / 'mutate:<ns>' 顺序记录（F2 断言）
+    handlers: new Map(), // event -> callback（测试驱动钩子路径用）
   }
   const settings = {
     register(ns, schema) {
@@ -90,7 +93,8 @@ export function makeCtx(options = {}) {
       return fn()
     },
     on(eventName, callback) {
-      /** 事件监听仅在插件内部使用；测试不驱动事件，槽位保留为 no-op。 */
+      /** 记录事件处理器（agent/request、agent/request-error、llm/stream），测试驱动真实钩子路径。 */
+      state.handlers.set(eventName, callback)
     },
     timeout() {},
   }

@@ -76,8 +76,10 @@
     `content.some is not a function`，这是 v0.6 探测"全部失败"的根因；
   - 探测请求带 `probe: true` 标记，`llm/stream` 旁路统计与注入，观测数据零污染；
   - 单次探测带 30s 超时（AbortController），单模型并发 3；
-  - 分类：`UNSUPPORTED_REASONING_EFFORT` → 黑名单（持久化 probeBlacklist）；
-    限流/超时 → blocked（不黑名单，不误判）；
+  - 分类：`UNSUPPORTED_REASONING_EFFORT` → 该次探测结果 rejected 列表（不入黑名单、
+    不持久化——探测是"测量"不是调用，v0.7.1 MAINT-013）；真实调用被网关拒绝
+    （agent/request-error / 流内 finish error）→ 仅会话内存黑名单（注入跳过，
+    不持久化，重启清零）；限流/超时 → blocked（不黑名单，不误判）；
   - 固化：实测可用等级写回 `llm-pi-ai` 模型能力声明并持久化 `probeEfforts`
     （重启后不再被生成表升级覆盖）；用户手写的声明永远跳过；
   - 固化写走既有 `settings.replace` 整节替换 + `settings/updated` 收敛路径，
@@ -131,9 +133,9 @@ dsh --profile canary web          # 观察启动日志无 failed fiber / 无等�
 #    c. curl http://127.0.0.1:<port>/reasoning-level-stats → 200 + JSON
 #    d. 切换全局等级 high ↔ max → 下一条消息统计里 effort 列变化
 #    e. 设置页点「一键探测全部模型并固化配置」→ 逐模型出结果（可用/拒绝/其他），
-#       完成后黑名单与能力声明写入 settings.yaml（llm-reasoning.probeBlacklist /
-#       probeEfforts）；curl POST /reasoning-level-stats/probe/apply 幂等返回
-#       修正后的写入数
+#       完成后能力声明写入 settings.yaml（llm-reasoning.probeEfforts）；黑名单仅
+#       当前会话内存态（stats 端点 payload.blacklist 可见，不再写 probeBlacklist）；
+#       curl POST /reasoning-level-stats/probe/apply 幂等返回修正后的写入数
 
 # 4) 清理
 dsh plugin --profile canary remove dsh-reasoning-level
