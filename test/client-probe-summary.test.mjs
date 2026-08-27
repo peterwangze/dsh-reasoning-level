@@ -157,13 +157,15 @@ test('(N2) probeAll 重跑成功时摘要恢复绿色 —  // TDD-GUARD-N2', asy
   assert.ok(btn1, 'probeAll button not found after load')
 
   // 第一轮：apply 失败 → 摘要红色（这是 N2 场景的前置）
+  // 语义色断言随 UX-001 design tokens 同步：不透明 #c62828/#2e7d32 → 半透明变体
+  // rgba(198,40,40,0.9)/rgba(46,125,50,0.9)（明暗自适应，语义不变：失败红/成功绿）
   btn1.props.onClick()
   await sleep(50)
   resetHooks('StatsPanel')
   const tree1 = statsFn(statsProps ?? { api: API })
   const summ1 = findSummary(tree1)
   assert.ok(summ1, 'summary element must render after first probe run')
-  assert.equal(summ1.props.style.color, '#c62828', '前置：失败轮摘要应为红色')
+  assert.equal(summ1.props.style.color, 'rgba(198,40,40,0.9)', '前置：失败轮摘要应为红色')
 
   // 第二轮：apply 成功 → 摘要应为绿色（N2 期望：probeAll 起始重置 probeSummaryOk）
   const btn2 = findButton(tree1, '一键探测全部模型并固化配置')
@@ -174,5 +176,5 @@ test('(N2) probeAll 重跑成功时摘要恢复绿色 —  // TDD-GUARD-N2', asy
   const tree2 = statsFn(statsProps ?? { api: API })
   const summ2 = findSummary(tree2)
   assert.ok(summ2, 'summary element must render after second probe run')
-  assert.equal(summ2.props.style.color, '#2e7d32', '成功重跑后摘要应为绿色（probeSummaryOk 需在 probeAll 起始重置）')
+  assert.equal(summ2.props.style.color, 'rgba(46,125,50,0.9)', '成功重跑后摘要应为绿色（probeSummaryOk 需在 probeAll 起始重置）')
 })
