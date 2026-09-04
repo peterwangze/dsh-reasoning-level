@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (0.7.3)
+
+### Fixed
+- **DSH 0.1.2-rc.1 升级兼容**（MAINT-021）：dsh-settings 0.1.2-rc.1 从公共导出面移除 `settingsNamespace`（连同 `installSettingsSection` / `deepEqualJson`），宿主行的静态具名 import 在模块加载期即抛 `SyntaxError`——插件行加载失败升级为 profile 挂载失败，**整机 DSH 拉不起**（用户 2026-09-05 实测）。现改为命名空间导入 + 运行时探测的跨版本接缝：优先取包内 `settingsNamespace`（≤0.1.1-rc.2 旧宿主），缺席时回退到语义同源（正则/报错/返回值一致）的本地校验器（≥0.1.2-rc.1 新宿主）——peers `*` 全版本范围可加载。
+- 新增回归守护：`test/settings-namespace-compat.test.mjs` 子进程以「无 `settingsNamespace` 导出」的 dsh-settings 存根加载宿主行，断言加载成功（守护不依赖 devDependencies 装的是哪一代，devDep 回退旧版时契约仍被测试）。
+
+### Changed
+- devDependencies `@deepseek-ai/dsh-settings` 0.1.1-rc.2 → **0.1.2-rc.1**（精确锁版）：测试套件自此针对新一代宿主包执行（47/47 全绿）；运行时依赖策略不变（dependencies 恒空、peers `*`）。
+
+### Notes
+- 其余 0.1.2-rc.1 宿主接缝核验无漂移：`settings.register/get/update/replace/mutate/describe`、`settings/updated` 事件、`llm.resolveModelInfo`/`llm.stream`/`llm/stream`、`agent/request(-error)`、`webServer.register` 及浏览器侧 `settings.section` 槽位均未变更；cordis 4.0.1→4.0.2、schemastery 3.18.1→3.18.2 lib 字节一致。
+- 金丝雀验证（layer 1，2026-09-05）：dsh-base + dsh-web-app + 本插件（file: 快照）组合启动日志零插件告警，`/reasoning-level-stats` 端点 HTTP 200，boot 组合脚本含本插件 client bundle。
+
+---
+
 ## 0.7.2 (2026-08-26)
 
 ### Added
