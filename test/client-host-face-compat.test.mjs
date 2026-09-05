@@ -71,14 +71,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // ── 新宿主形状 fixture（0.1.2-rc.1 typed remote 直面）────────────────────
 // settings describe 值锚定 dsh-api-remotes settings/describe result schema
-// （writable/hasDocument/namespaces[{ns, schema, value, base?}]）。
+// （writable/hasDocument/namespaces[{ns, schema, value, base?, user?, applies,
+// secrets[{path,set}], revision}]——R0-F5：必填字段全量保真）。
 const DESCRIBE_VALUE = {
   writable: true,
   hasDocument: true,
   namespaces: [
-    { ns: 'llm-reasoning', schema: null, value: { enabled: true, level: 'high', models: { 'demo/m1': 'low' }, purposes: {}, syncDefaultAgent: false, statsPublic: false } },
-    { ns: 'llm-pi-ai', schema: null, value: { providers: { demo: { reasoning: 'high', models: [{ id: 'm1', reasoningEfforts: { low: 'low', high: 'high' } }] } } } },
-    { ns: 'llm-deepseek', schema: null, value: { reasoningEffort: 'max' } },
+    { ns: 'llm-reasoning', schema: null, value: { enabled: true, level: 'high', models: { 'demo/m1': 'low' }, purposes: {}, syncDefaultAgent: false, statsPublic: false }, applies: 'live', secrets: [], revision: 1 },
+    { ns: 'llm-pi-ai', schema: null, value: { providers: { demo: { reasoning: 'high', models: [{ id: 'm1', reasoningEfforts: { low: 'low', high: 'high' } }] } } }, applies: 'live', secrets: [], revision: 1 },
+    { ns: 'llm-deepseek', schema: null, value: { reasoningEffort: 'max' }, applies: 'live', secrets: [], revision: 1 },
   ],
 }
 // modelCatalog 值锚定 session/modelCatalog result schema（groups 形状与旧
@@ -163,6 +164,13 @@ function findText(node, needle, depth = 0) {
   return findText(node.props?.children, needle, depth + 1)
 }
 
+function findButton(node, label) {
+  if (node === null || node === undefined || typeof node !== 'object') return null
+  if (node.$$ === 'button' && (node.children ?? []).includes(label) && typeof node.props?.onClick === 'function') return node
+  for (const child of node.children ?? []) { const r = findButton(child, label); if (r) return r }
+  return findButton(node.props?.children, label)
+}
+
 test('(MAINT-022) 模块 inject 声明新面命名空间、不再依赖 connection — // TDD-GUARD-MAINT-022', () => {
   const factoryExports = loadClient()
   assert.deepEqual(
@@ -236,7 +244,7 @@ test('(MAINT-022) ModelDefaults 经 session.modelCatalog 加载模型列表 — 
   assert.ok(options.includes('demo/m1'), '模型下拉必须包含 catalog 中的 demo/m1，实际：' + JSON.stringify(options))
 })
 
-test('(MAINT-022) change 经 remote.settings.update / mutate（删模型键走 unset ops）— // TDD-GUARD-MAINT-022', async () => {
+test('(MAINT-022) change 经 remote.settings.update（全局等级变更）— // TDD-GUARD-MAINT-022', async () => {
   const factoryExports = loadClient()
   const calls = []
   const ctx = newHostCtx({ calls })
@@ -292,4 +300,66 @@ test('(MAINT-022) remote 命名空间缺失时 fail-loud（结构化错误，非
       return true
     },
   )
+})
+
+test('(MAINT-022/R0-F2) 删除模型默认经 remote.settings.mutate（ns + unset ops 位置参数）— // TDD-GUARD-MAINT-022', async () => {
+  const factoryExports = loadClient()
+  const calls = []
+  const ctx = newHostCtx({ calls })
+  const registered = applyToRegistry(factoryExports, ctx)
+  const pageElement = registered[0].render({})
+  const pageTag = pageElement.tag
+  const pageProps = pageElement.props
+
+  // describe 值含 models: {'demo/m1':'low'} → 模型级默认表有配置行
+  resetHooks('ReasoningPage'); pageTag(pageProps); await sleep(10)
+  resetHooks('ReasoningPage')
+  const tree1 = pageTag(pageProps)
+  await sleep(10)
+
+  const components = []
+  collectComponents(tree1, components)
+  const modelDefaults = components.find(([name]) => name === 'ModelDefaults')
+  assert.ok(modelDefaults, 'ModelDefaults must be reachable')
+  const [, fn, props] = modelDefaults
+  resetHooks('ModelDefaults'); fn(props); await sleep(10)
+  resetHooks('ModelDefaults')
+  const mdTree = fn(props)
+  await sleep(10)
+
+  // 找到 demo/m1 配置行的「删除」按钮（按钮文案 '删除'）
+  const delBtn = findButton(mdTree, '删除')
+  assert.ok(delBtn, '删除按钮必须存在（models 配置行）')
+  delBtn.props.onClick()
+
+  const mutate = calls.find((c) => Array.isArray(c) && c[0] === 'settings.mutate')
+  assert.ok(mutate, '删除模型默认必须经 remote.settings.mutate（update 深合并无法删键）')
+  assert.equal(mutate[1], 'llm-reasoning', 'mutate ns 必须是 llm-reasoning')
+  // ops 数组产自 vm 沙箱内（原型域不同），deepStrictEqual 误报——用 JSON 形状比较
+  assert.equal(
+    JSON.stringify(mutate[2]),
+    JSON.stringify([{ op: 'unset', path: ['models', 'demo/m1'] }]),
+    'mutate ops 必须是 unset [models, key]（形状锚定 api-remotes:4771-4774）',
+  )
+})
+
+test('(MAINT-022/R0-F1) describe 失败时错误文本进入页面（loading 态渲染 notice，不停在「加载中…」）— // TDD-GUARD-MAINT-022', async () => {
+  const factoryExports = loadClient()
+  const ctx = newHostCtx()
+  // 覆写 describe 为信封失败（ok:false + error.message）
+  const settings = ctx.get('remote.settings')
+  settings.describe = async () => ({ ok: false, error: { message: '宿主 settings 命名空间拒绝：演示错误' } })
+  const registered = applyToRegistry(factoryExports, ctx)
+  const pageElement = registered[0].render({})
+  const pageTag = pageElement.tag
+
+  resetHooks('ReasoningPage'); pageTag(pageElement.props); await sleep(10)
+  resetHooks('ReasoningPage')
+  const tree = pageTag(pageElement.props)
+  await sleep(10)
+
+  // view 恒 null（describe 失败）→ 页面必须渲染「读取失败：…」而非永远「加载中…」
+  assert.ok(findText(tree, '读取失败'), '错误提示必须可见（R0-F1：notice 需在 loading 态渲染）')
+  assert.ok(findText(tree, '演示错误'), '宿主错误文本必须透出（信封 error.message）')
+  assert.ok(!findText(tree, '加载中'), '失败后不得停留在无差别 loading 态')
 })
