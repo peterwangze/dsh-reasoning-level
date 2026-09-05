@@ -10,14 +10,14 @@
 
 ### Changed
 - 无 breaking changes
-- 无依赖更新（dependencies 保持空、peers `*` 不变）
+- 无运行时依赖更新（dependencies 保持空、peers `*` 不变）；devDeps 精确锁版 `@deepseek-ai/dsh-api-remotes@0.1.2-rc.1`（判别测试真实工件来源，CI 环境可解析——非运行时依赖）
 - 无 Feature Flag 变更
 
 ### Notes
 - 已知问题：无（全量 50 用例中 3 例沙箱 spawn EPERM 为本机测试环境限制，非产品缺陷）。
 - 根因分析与防护方案详见 `docs/retro/rca-MAINT-025.md`（RCA 报告，随本版入库）。
 - 客户端面对宿主的版本要求不变（DSH ≥ 0.1.2-rc.1——v0.7.3 既有要求，非本版新增 breaking）。
-- 发布范围 = 仅 MAINT-025（ed3c784 修复与防护 + cdbfee7 RCA 报告）。
+- 发布范围 = 仅 MAINT-025（ed3c784 修复与防护 + cdbfee7 RCA 报告 + devDeps 锁版修复）。
 
 ---
 
