@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased (0.7.3)
+## 0.7.3 (2026-09-05)
+
+### Added
+- **设置页 UI/UX 重构**（UX-001）：现代卡片式 + 明暗自适应——设计令牌集中（色板/间距/圆角/字号阶梯）、5 卡片分区（全局设置/模型级默认/辅助调用等级/实时统计/说明折叠）、等级 chips 徽章、斑马纹表格、统一按钮体系；全部颜色半透明灰阶 + currentColor + 语义色半透明变体（零宿主 CSS 变量依赖）；零新依赖，功能与 wire 面不变。
 
 ### Fixed
 - **DSH 0.1.2-rc.1 升级兼容（客户端面）**（MAINT-022）：dsh-client-connection 0.1.2-rc.1 移除 connection handle 的 `api` 字段（宿主源码 lib/client.js:4754-4825），客户端 `apply()` 旧实现 `connection.api` 恒 undefined → 设置页「统一推理等级」内容区整页空白（首次数据调用同步抛 TypeError，被宿主 SlotErrorBoundary 捕获渲染空 div；用户 2026-09-05 截图实证，link:/file: 重装无改善）。现改为 `hostApiFace` 适配层——统一消费宿主 typed remote 命名空间（`remote.settings` describe/update/mutate + `remote.session.modelCatalog`），收敛为页面既有旧信封 `{result:{ok,value|error}}`（页面消费点零改动）；模块 `inject` 声明 `['slots','locale','remote','remote.settings','remote.session']`（runner 激活门控等待宿主面就绪，官方先例 dsh-client-ui-settings-models）；旧 connection 路径删除；命名空间缺失 fail-loud（结构化错误进页面，禁裸 TypeError）。同源先例：dsh-agent-router FIX-028（用户复验通过）。

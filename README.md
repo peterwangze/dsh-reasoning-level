@@ -2,7 +2,7 @@
 
 > DeepSeek Harness（DSH）统一推理等级插件：**一个设置项，动态管理所有模型的默认思考强度**——含模型级默认与实时调用观测。
 
-[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.7.2-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
+[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.7.3-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
 
 ---
 
@@ -46,6 +46,10 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 - 兼容官方安装通道：`dsh plugin add / update / remove`（`dsh.bundle.patch` bundle 层声明）
 
 ## 一键安装
+
+> **宿主版本要求**：v0.7.3 起设置页（客户端面）适配 DSH **0.1.2-rc.1+** 的
+> typed remote 接口；旧宿主（≤0.1.1-rc.x）上插件仍可安全加载（宿主面跨版本
+> 接缝），但设置页不出现，其余功能不受影响。请保持宿主与插件同代升级。
 
 ### 方式一（推荐）：`dsh plugin` 标准命令
 
