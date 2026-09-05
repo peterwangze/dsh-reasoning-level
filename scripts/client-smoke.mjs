@@ -118,17 +118,61 @@ const API = {
 // ── MAINT-022：宿主 0.1.2-rc.1 客户端形状——connection.api 已移除，统一经
 // remote.settings / remote.session 命名空间（typed remote 直面 {ok,value|error}）。
 // 适配层（hostApiFace）消费该形状并收敛为上面的旧信封 API；冒烟自此锚定新接缝。
+// ── MAINT-025 (b)：桩升级为契约校验桩（RCA §8-b）——元数/形状违约即 fail(exit 1)。
+// 桩形状锚定宿主描述符而非适配层假设：settings.describe / session.modelCatalog
+// 零参；settings.update/mutate 三参（ns, patch/ops, expectedRevision——第三参必须
+// 占位，值可 undefined = 无条件写入，dsh-api-settings-controller lib/index.js:443-472）；
+// ops 元素 {op:'set',path:string[],value} | {op:'unset',path:string[]}（api-remotes
+// lib/client.js:4759-4775）；网关严格元数守卫事实源 dsh-api-gateway lib/client.js:1626-1633。
+// 旧「记录型 ok 桩」不校验元数 = 桩 ↔ 适配层循环自证（RCA 5-Why 第 3 层——本冒烟
+// 曾全绿放过 2 参转发缺陷）。真实工件判别另见 test/host-face-contract.test.mjs。
+const contractViolation = (message) => {
+  console.error('smoke: host-face contract violation — ' + message)
+  process.exit(1)
+}
+
+const assertWriteContract = (method, args, checkSecondArg) => {
+  if (args.length !== 3) {
+    contractViolation(`${method} expected 3 positional args (ns, patch/ops, expectedRevision — dsh-api-remotes 0.1.2-rc.1 descriptor; gateway arity guard dsh-api-gateway lib/client.js:1626-1633), got ${args.length}`)
+  }
+  if (typeof args[0] !== 'string' || args[0].length === 0) {
+    contractViolation(`${method} ns must be a non-empty string, got ${JSON.stringify(args[0])}`)
+  }
+  checkSecondArg(args[1])
+  if (!(args[2] === undefined || (Number.isInteger(args[2]) && args[2] >= 0))) {
+    contractViolation(`${method} expectedRevision must be undefined or a non-negative integer, got ${JSON.stringify(args[2])}`)
+  }
+}
+
 const HOST_FACES = {
   remoteSettings: {
-    describe: async () => {
+    describe: async (...args) => {
+      if (args.length !== 0) contractViolation(`settings.describe expected 0 args (read path — arity match is why rendering survived MAINT-025), got ${args.length}`)
       const response = await API.settings.describe()
       return { ok: response.result.ok, value: response.result.value }
     },
-    update: async (ns, patch) => ({ ok: true, value: { ns, value: patch } }),
-    mutate: async (ns, ops) => ({ ok: true, value: { ns, value: {} } }),
+    update: async (...args) => {
+      assertWriteContract('settings.update', args, (patch) => {
+        if (!patch || typeof patch !== 'object' || Array.isArray(patch)) contractViolation('settings.update patch must be a plain object, got ' + JSON.stringify(patch))
+      })
+      return { ok: true, value: { ns: args[0], value: args[1] } }
+    },
+    mutate: async (...args) => {
+      assertWriteContract('settings.mutate', args, (ops) => {
+        if (!Array.isArray(ops)) contractViolation('settings.mutate ops must be an array, got ' + JSON.stringify(ops))
+        for (const op of ops) {
+          const pathOk = op !== null && typeof op === 'object' && Array.isArray(op.path) && op.path.every((key) => typeof key === 'string')
+          const isSet = pathOk && op.op === 'set' && 'value' in op
+          const isUnset = pathOk && op.op === 'unset'
+          if (!isSet && !isUnset) contractViolation(`settings.mutate ops element must be {op:"set",path:string[],value} | {op:"unset",path:string[]} (api-remotes:4759-4774), got ${JSON.stringify(op)}`)
+        }
+      })
+      return { ok: true, value: { ns: args[0], value: {} } }
+    },
   },
   remoteSession: {
-    modelCatalog: async () => {
+    modelCatalog: async (...args) => {
+      if (args.length !== 0) contractViolation(`session.modelCatalog expected 0 args, got ${args.length}`)
       const response = await API.llm.models()
       return { ok: response.result.ok, value: { groups: response.result.value.groups, failures: [] } }
     },
@@ -228,5 +272,13 @@ if (rendered < 3) {
   console.error('smoke: expected to exercise at least 3 components (page, defaults, stats), rendered ' + rendered)
   process.exit(1)
 }
+
+// ── 3. MAINT-025 (b)：写路径经真实适配层驱动契约桩。旧冒烟从不触发写路径，
+// 契约桩不承重 = 防护形同虚设；此步让 update/mutate 的元数/形状校验真实执行
+// （调用形状 = 页面 change() 的实际形状，锚定 lib/client.js:766-772——页面不传
+// expectedRevision，由适配层按三参契约补位）。
+await pageElement.props.api.settings.update({ ns: 'llm-reasoning', patch: { level: 'high' } })
+await pageElement.props.api.settings.mutate({ ns: 'llm-reasoning', ops: [{ op: 'unset', path: ['models', 'demo/m1'] }] })
+
 for (const timer of timers) clearTimeout(timer)
-console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered')
+console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, write-path contract stubs exercised (3-arg update/mutate)')

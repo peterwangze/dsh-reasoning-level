@@ -91,10 +91,15 @@ const CATALOG_VALUE = {
 }
 
 function newHostCtx({ calls } = {}) {
+  // MAINT-025 F3：桩升级为元数记录桩——rest 参数记录 [方法, 实传元数, ...实参]。
+  // 旧桩 `async (ns, patch)` 是普通 JS 函数，多传少传都不报错（元数盲区 =
+  // MAINT-025 假绿机理，RCA 5-Why 第 3 层）；元数断言在用例内完成，违约即红。
+  // 桩形状锚定宿主描述符（dsh-api-remotes 0.1.2-rc.1：update/mutate 三参），
+  // 非适配层假设；真实工件判别另见 test/host-face-contract.test.mjs。
   const remoteSettings = {
     describe: async () => (calls?.push('settings.describe'), { ok: true, value: DESCRIBE_VALUE }),
-    update: async (ns, patch) => (calls?.push(['settings.update', ns, patch]), { ok: true, value: { ns, value: patch } }),
-    mutate: async (ns, ops) => (calls?.push(['settings.mutate', ns, ops]), { ok: true, value: { ns, value: {} } }),
+    update: async (...args) => (calls?.push(['settings.update', args.length, ...args]), { ok: true, value: { ns: args[0], value: args[1] } }),
+    mutate: async (...args) => (calls?.push(['settings.mutate', args.length, ...args]), { ok: true, value: { ns: args[0], value: {} } }),
   }
   const remoteSession = {
     modelCatalog: async () => (calls?.push('session.modelCatalog'), { ok: true, value: CATALOG_VALUE }),
@@ -275,8 +280,77 @@ test('(MAINT-022) change 经 remote.settings.update（全局等级变更）— /
   await sleep(20)
   const update = calls.find((c) => Array.isArray(c) && c[0] === 'settings.update')
   assert.ok(update, '选择等级必须经 remote.settings.update')
-  assert.equal(update[1], 'llm-reasoning', 'update ns 必须是 llm-reasoning')
-  assert.equal(update[2].level, 'medium', 'update patch 必须携带新等级')
+  // MAINT-025 F3：记录形状 = [kind, 实传元数, ...实参]
+  assert.equal(update[2], 'llm-reasoning', 'update ns 必须是 llm-reasoning')
+  assert.equal(update[3].level, 'medium', 'update patch 必须携带新等级')
+})
+
+test('(MAINT-025) 写路径三参判别：update/mutate 必须按宿主 0.1.2-rc.1 元数契约三参转发（第三参显式占位）— // TDD-GUARD-MAINT-025', async () => {
+  const factoryExports = loadClient()
+  const calls = []
+  const ctx = newHostCtx({ calls })
+  const registered = applyToRegistry(factoryExports, ctx)
+  const pageElement = registered[0].render({})
+  const pageTag = pageElement.tag
+  const pageProps = pageElement.props
+
+  resetHooks('ReasoningPage'); pageTag(pageProps); await sleep(10)
+  resetHooks('ReasoningPage')
+  pageTag(pageProps); await sleep(10)
+
+  // 写路径①：全局等级下拉 → update（change({level}) 调用形状锚定 lib/client.js:818）
+  let levelSelect = null
+  resetHooks('ReasoningPage')
+  ;(function find(node) {
+    if (node === null || node === undefined || typeof node !== 'object' || levelSelect) return
+    if (node.$$ === 'select' && typeof node.props?.onChange === 'function' && Array.isArray(node.children) && node.children.some((c) => typeof c === 'object' && c.$$ === 'option' && c.props?.value === 'xhigh')) levelSelect = node.props
+    for (const child of node.children ?? []) find(child)
+    find(node.props?.children)
+  })(pageTag(pageProps))
+  assert.ok(levelSelect, '全局等级下拉必须存在')
+  levelSelect.onChange({ target: { value: 'low' } })
+  await sleep(20)
+
+  // 元数契约：宿主描述符 update = [ns, patch, expectedRevision]（api-remotes:5216-5253），
+  // 客户端网关严格守卫（dsh-api-gateway lib/client.js:1626-1633）——2 参转发即
+  // RPC 前 throw「expected 3 argument(s), got 2」（MAINT-025 根因本体）。
+  const update = calls.find((c) => Array.isArray(c) && c[0] === 'settings.update')
+  assert.ok(update, '等级变更必须经 remote.settings.update')
+  assert.equal(update[1], 3, 'update 实传元数必须为 3（ns, patch, expectedRevision）——2 参转发 = MAINT-025 根因')
+  assert.equal(update[2], 'llm-reasoning', 'update ns 必须是 llm-reasoning')
+  assert.equal(update[3].level, 'low', 'update patch 必须携带新等级')
+  assert.equal(update[4], undefined, 'expectedRevision 占位值 undefined = 无条件写入（dsh-api-settings-controller lib/index.js:443；乐观并发为后续独立任务）')
+
+  // 写路径②：删除模型级默认 → mutate（removeEntry 调用形状锚定 lib/client.js:770-771）
+  const settings = ctx.get('remote.settings')
+  settings.describe = async () => ({ ok: true, value: DESCRIBE_VALUE })
+  resetHooks('ReasoningPage')
+  const tree = pageTag(pageProps)
+  await sleep(10)
+  const components = []
+  collectComponents(tree, components)
+  const modelDefaults = components.find(([name]) => name === 'ModelDefaults')
+  assert.ok(modelDefaults, 'ModelDefaults must be reachable')
+  const [, fn, props] = modelDefaults
+  resetHooks('ModelDefaults'); fn(props); await sleep(10)
+  resetHooks('ModelDefaults')
+  const mdTree = fn(props)
+  await sleep(10)
+  const delBtn = findButton(mdTree, '删除')
+  assert.ok(delBtn, '删除按钮必须存在（models 配置行）')
+  delBtn.props.onClick()
+  await sleep(20)
+
+  const mutate = calls.find((c) => Array.isArray(c) && c[0] === 'settings.mutate')
+  assert.ok(mutate, '删除模型默认必须经 remote.settings.mutate')
+  assert.equal(mutate[1], 3, 'mutate 实传元数必须为 3（ns, ops, expectedRevision）——2 参转发 = MAINT-025 根因')
+  assert.equal(mutate[2], 'llm-reasoning', 'mutate ns 必须是 llm-reasoning')
+  assert.equal(
+    JSON.stringify(mutate[3]),
+    JSON.stringify([{ op: 'unset', path: ['models', 'demo/m1'] }]),
+    'mutate ops 必须是 unset [models, key]（形状锚定 api-remotes:4771-4774）',
+  )
+  assert.equal(mutate[4], undefined, 'expectedRevision 占位值 undefined（无条件写入）')
 })
 
 test('(MAINT-022) remote 命名空间缺失时 fail-loud（结构化错误，非裸 TypeError）— // TDD-GUARD-MAINT-022', async () => {
@@ -334,10 +408,11 @@ test('(MAINT-022/R0-F2) 删除模型默认经 remote.settings.mutate（ns + unse
 
   const mutate = calls.find((c) => Array.isArray(c) && c[0] === 'settings.mutate')
   assert.ok(mutate, '删除模型默认必须经 remote.settings.mutate（update 深合并无法删键）')
-  assert.equal(mutate[1], 'llm-reasoning', 'mutate ns 必须是 llm-reasoning')
+  // MAINT-025 F3：记录形状 = [kind, 实传元数, ...实参]
+  assert.equal(mutate[2], 'llm-reasoning', 'mutate ns 必须是 llm-reasoning')
   // ops 数组产自 vm 沙箱内（原型域不同），deepStrictEqual 误报——用 JSON 形状比较
   assert.equal(
-    JSON.stringify(mutate[2]),
+    JSON.stringify(mutate[3]),
     JSON.stringify([{ op: 'unset', path: ['models', 'demo/m1'] }]),
     'mutate ops 必须是 unset [models, key]（形状锚定 api-remotes:4771-4774）',
   )
