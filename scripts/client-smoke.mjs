@@ -115,6 +115,26 @@ const API = {
   },
 }
 
+// ── MAINT-022：宿主 0.1.2-rc.1 客户端形状——connection.api 已移除，统一经
+// remote.settings / remote.session 命名空间（typed remote 直面 {ok,value|error}）。
+// 适配层（hostApiFace）消费该形状并收敛为上面的旧信封 API；冒烟自此锚定新接缝。
+const HOST_FACES = {
+  remoteSettings: {
+    describe: async () => {
+      const response = await API.settings.describe()
+      return { ok: response.result.ok, value: response.result.value }
+    },
+    update: async (ns, patch) => ({ ok: true, value: { ns, value: patch } }),
+    mutate: async (ns, ops) => ({ ok: true, value: { ns, value: {} } }),
+  },
+  remoteSession: {
+    modelCatalog: async () => {
+      const response = await API.llm.models()
+      return { ok: response.result.ok, value: { groups: response.result.value.groups, failures: [] } }
+    },
+  },
+}
+
 // ── load the client module through its own ModuleLoader contract ─────────
 let loaded = null
 const sandbox = {
@@ -145,7 +165,10 @@ const slotsApi = {
   },
 }
 const ctx = {
-  get: (name) => (name === 'connection' ? { api: API } : name === 'locale' ? { getSnapshot: () => ({ active: 'zh' }) } : undefined),
+  // MAINT-022：新宿主形状——remote.settings/remote.session（connection.api 已移除）
+  get: (name) => (name === 'remote.settings' ? HOST_FACES.remoteSettings
+    : name === 'remote.session' ? HOST_FACES.remoteSession
+    : name === 'locale' ? { getSnapshot: () => ({ active: 'zh' }) } : undefined),
   slots: slotsApi,
 }
 client.apply(ctx)
@@ -158,10 +181,15 @@ if (pageElement.$$ !== 'component' || typeof pageElement.tag !== 'function') {
   console.error('smoke: section render did not produce a ReasoningPage component element')
   process.exit(1)
 }
+if (pageElement.props.api === undefined || pageElement.props.api.settings === undefined) {
+  console.error('smoke: section element must carry the hostApiFace api (MAINT-022)')
+  process.exit(1)
+}
 
 // ── 2. render every component through loading AND loaded paths ───────────
+// （MAINT-022：页面 props 携带适配层 api——冒烟走真实接缝而非旁路旧信封）
 const components = [
-  ['ReasoningPage', pageElement.tag, { api: API, t: client.t ?? undefined }],
+  ['ReasoningPage', pageElement.tag, pageElement.props],
 ]
 const factoryExports = client
 // The factory only exposes apply/inject on module.exports; components are
@@ -187,13 +215,13 @@ async function renderTwice(name, fn, props) {
 
 // First pass over the page: collects ModelDefaults / PurposeDefaults /
 // StatsPanel component elements nested in the loaded ReasoningPage render.
-const pageTree = await renderTwice('ReasoningPage', pageElement.tag, { api: API })
+const pageTree = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
 collectComponents(pageTree, components)
 
 let rendered = 0
 for (const [name, fn, props] of components) {
   if (typeof fn !== 'function') continue
-  await renderTwice(name, fn, props ?? { api: API })
+  await renderTwice(name, fn, props ?? pageElement.props)
   rendered += 1
 }
 if (rendered < 3) {
