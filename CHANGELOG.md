@@ -3,14 +3,18 @@
 ## Unreleased (0.7.3)
 
 ### Fixed
-- **DSH 0.1.2-rc.1 升级兼容**（MAINT-021）：dsh-settings 0.1.2-rc.1 从公共导出面移除 `settingsNamespace`（连同 `installSettingsSection` / `deepEqualJson`），宿主行的静态具名 import 在模块加载期即抛 `SyntaxError`——插件行加载失败升级为 profile 挂载失败，**整机 DSH 拉不起**（用户 2026-09-05 实测）。现改为命名空间导入 + 运行时探测的跨版本接缝：优先取包内 `settingsNamespace`（≤0.1.1-rc.2 旧宿主），缺席时回退到语义同源（正则/报错/返回值一致）的本地校验器（≥0.1.2-rc.1 新宿主）——peers `*` 全版本范围可加载。
+- **DSH 0.1.2-rc.1 升级兼容（客户端面）**（MAINT-022）：dsh-client-connection 0.1.2-rc.1 移除 connection handle 的 `api` 字段（宿主源码 lib/client.js:4754-4825），客户端 `apply()` 旧实现 `connection.api` 恒 undefined → 设置页「统一推理等级」内容区整页空白（首次数据调用同步抛 TypeError，被宿主 SlotErrorBoundary 捕获渲染空 div；用户 2026-09-05 截图实证，link:/file: 重装无改善）。现改为 `hostApiFace` 适配层——统一消费宿主 typed remote 命名空间（`remote.settings` describe/update/mutate + `remote.session.modelCatalog`），收敛为页面既有旧信封 `{result:{ok,value|error}}`（页面消费点零改动）；模块 `inject` 声明 `['slots','locale','remote','remote.settings','remote.session']`（runner 激活门控等待宿主面就绪，官方先例 dsh-client-ui-settings-models）；旧 connection 路径删除；命名空间缺失 fail-loud（结构化错误进页面，禁裸 TypeError）。同源先例：dsh-agent-router FIX-028（用户复验通过）。
+- **DSH 0.1.2-rc.1 升级兼容（宿主面）**（MAINT-021）：dsh-settings 0.1.2-rc.1 从公共导出面移除 `settingsNamespace`（连同 `installSettingsSection` / `deepEqualJson`），宿主行的静态具名 import 在模块加载期即抛 `SyntaxError`——插件行加载失败升级为 profile 挂载失败，**整机 DSH 拉不起**（用户 2026-09-05 实测）。现改为命名空间导入 + 运行时探测的跨版本接缝：优先取包内 `settingsNamespace`（≤0.1.1-rc.2 旧宿主），缺席时回退到语义同源（正则/报错/返回值一致）的本地校验器（≥0.1.2-rc.1 新宿主）——peers `*` 全版本范围可加载。
 - 新增回归守护：`test/settings-namespace-compat.test.mjs` 子进程以「无 `settingsNamespace` 导出」的 dsh-settings 存根加载宿主行，断言加载成功（守护不依赖 devDependencies 装的是哪一代，devDep 回退旧版时契约仍被测试）。
+- 新增回归守护：`test/client-host-face-compat.test.mjs` 以「新宿主形状」fixture（connection 无 api、remote.settings/remote.session 直面）驱动真实 `lib/client.js`——注册/描述全链/模型目录/等级变更/fail-loud 六用例（旧代码在此形状下 4 用例红：复现用户空白页根因）。`scripts/client-smoke.mjs` ctx 同步迁移新形状并断言 section 元素携带适配层 api。
 
 ### Changed
 - devDependencies `@deepseek-ai/dsh-settings` 0.1.1-rc.2 → **0.1.2-rc.1**（精确锁版）：测试套件自此针对新一代宿主包执行（47/47 全绿）；运行时依赖策略不变（dependencies 恒空、peers `*`）。
+- 客户端模块 `inject` 声明 `['slots','connection','locale']` → `['slots','locale','remote','remote.settings','remote.session']`：设置页自此要求宿主 ≥ 0.1.2-rc.1（旧宿主上插件客户端保持等待、设置页不出现，其余功能不受影响；宿主行仍跨版本可加载——MAINT-021 接缝）。
 
 ### Notes
 - 其余 0.1.2-rc.1 宿主接缝核验无漂移：`settings.register/get/update/replace/mutate/describe`、`settings/updated` 事件、`llm.resolveModelInfo`/`llm.stream`/`llm/stream`、`agent/request(-error)`、`webServer.register` 及浏览器侧 `settings.section` 槽位均未变更；cordis 4.0.1→4.0.2、schemastery 3.18.1→3.18.2 lib 字节一致。
+- `session.modelCatalog` 的 `groups` 形状与旧 `api.llm.models` 的 `groups` 一致（锚定 dsh-api-remotes result schema），模型级默认下拉数据面无漂移。
 - 金丝雀验证（layer 1，2026-09-05）：dsh-base + dsh-web-app + 本插件（file: 快照）组合启动日志零插件告警，`/reasoning-level-stats` 端点 HTTP 200，boot 组合脚本含本插件 client bundle。
 
 ---
