@@ -86,6 +86,13 @@ const STATS_FIXTURE = {
     { t: Date.now(), provider: 'demo', model: 'm1', effort: 'high', rt: 12, rc: null, ot: 34, it: 10, duration: 60, finish: 'stop' },
   ],
   blacklist: {},
+  // 027-F3：持久化探测回显——StatsPanel 挂载轮询读到 lastProbe 后必须重建结果表
+  lastProbe: {
+    t: 1757100000000,
+    models: {
+      'demo/m1': { working: ['high', 'max'], rejected: ['xhigh'], blocked: [], persisted: 'no-change-already-correct' },
+    },
+  },
 }
 
 const API = {
@@ -282,13 +289,34 @@ if (!pageTextAll.includes('demo=高') || !pageTextAll.includes('≠全局最大'
 }
 
 let rendered = 0
+let statsPanelTree = null
 for (const [name, fn, props] of components) {
   if (typeof fn !== 'function') continue
-  await renderTwice(name, fn, props ?? pageElement.props)
+  const tree = await renderTwice(name, fn, props ?? pageElement.props)
+  if (name === 'StatsPanel') statsPanelTree = tree
   rendered += 1
 }
 if (rendered < 3) {
   console.error('smoke: expected to exercise at least 3 components (page, defaults, stats), rendered ' + rendered)
+  process.exit(1)
+}
+
+// ── 2c. 027-F3/F4：StatsPanel 挂载从持久化 lastProbe 重建结果表 + 持久化列 ──
+// （fixture lastProbe 携带 demo/m1 {working:[high,max], persisted:no-change-…}；
+//  回显表必须出现该模型词条与「持久化」列结局文案；「从未探测」空态必须不出现）
+if (statsPanelTree === null) {
+  console.error('smoke: StatsPanel component was not exercised — cannot assert lastProbe restore (027-F3)')
+  process.exit(1)
+}
+const statsText = []
+collectText(statsPanelTree, statsText)
+const statsTextAll = statsText.join('|')
+if (!statsTextAll.includes('demo/m1') || !statsTextAll.includes('持久化') || !statsTextAll.includes('已与实测一致')) {
+  console.error('smoke: StatsPanel must rebuild probe results from persisted lastProbe with persisted-outcome column (027-F3/F4)')
+  process.exit(1)
+}
+if (statsTextAll.includes('尚未探测过')) {
+  console.error('smoke: never-probed empty state must NOT render when lastProbe has models (027-F3)')
   process.exit(1)
 }
 
