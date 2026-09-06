@@ -95,7 +95,9 @@ const API = {
         ok: true,
         value: {
           namespaces: [
-            { ns: 'llm-reasoning', value: { enabled: true, level: 'high', models: {}, purposes: {}, syncDefaultAgent: false, statsPublic: false } },
+            // 028-F2 冒烟断言用：全局 level=max + 路由 reasoning=high（陈旧值）→
+            // appliedSummary 必须值感知渲染「demo=高（≠全局最大）」而非存在性计数掩盖
+            { ns: 'llm-reasoning', value: { enabled: true, level: 'max', models: {}, purposes: {}, syncDefaultAgent: false, statsPublic: false } },
             { ns: 'llm-pi-ai', value: { providers: { demo: { reasoning: 'high', models: [{ id: 'm1', reasoningEfforts: { high: 'high' } }] } } } },
             { ns: 'llm-deepseek', value: { reasoningEffort: 'max' } },
           ],
@@ -261,6 +263,23 @@ async function renderTwice(name, fn, props) {
 // StatsPanel component elements nested in the loaded ReasoningPage render.
 const pageTree = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
 collectComponents(pageTree, components)
+
+// ── 2b. 028-F2：appliedSummary 值感知——路由当前值 ≠ 全局目标时如实警示 ─────
+// （fixture：全局 level=max + demo 路由 reasoning=high → 必须渲染「demo=高」
+//  与「≠全局最大」失配标注；存在性计数（已应用 1 个路由）= 回归即失败）
+function collectText(node, into) {
+  if (node === null || node === undefined) return
+  if (typeof node === 'string' || typeof node === 'number') { into.push(String(node)); return }
+  if (typeof node !== 'object') return
+  for (const child of node.children ?? []) collectText(child, into)
+}
+const pageText = []
+collectText(pageTree, pageText)
+const pageTextAll = pageText.join('|')
+if (!pageTextAll.includes('demo=高') || !pageTextAll.includes('≠全局最大')) {
+  console.error('smoke: appliedSummary must render route values and warn on mismatch vs global level (028-F2)')
+  process.exit(1)
+}
 
 let rendered = 0
 for (const [name, fn, props] of components) {
