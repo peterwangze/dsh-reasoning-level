@@ -84,6 +84,9 @@ const STATS_FIXTURE = {
   },
   recent: [
     { t: Date.now(), provider: 'demo', model: 'm1', effort: 'high', rt: 12, rc: null, ot: 34, it: 10, duration: 60, finish: 'stop' },
+    // 028-F3：(默认) 记账复合标注——入口无显式等级（effort:null）+ 服务端推导的
+    // 将物化路由默认（defaulted:'high'）→ 最近调用表必须渲染「默认→高」
+    { t: Date.now(), provider: 'demo', model: 'm1', effort: null, defaulted: 'high', rt: 12, rc: null, ot: 34, it: 10, duration: 60, finish: 'stop' },
   ],
   blacklist: {},
   // 027-F3：持久化探测回显——StatsPanel 挂载轮询读到 lastProbe 后必须重建结果表
@@ -317,6 +320,19 @@ if (!statsTextAll.includes('demo/m1') || !statsTextAll.includes('持久化') || 
 }
 if (statsTextAll.includes('尚未探测过')) {
   console.error('smoke: never-probed empty state must NOT render when lastProbe has models (027-F3)')
+  process.exit(1)
+}
+
+// ── 2d. 028-F3：(默认) 记账复合标注 + statsHint 措辞如实化 ──────────────────
+// （fixture recent 含 effort:null + defaulted:'high' → 最近调用表必须渲染复合
+//  标签「默认→高」；说明区 statsHint 不得再出现与实现不符的旧措辞「默认物化后的
+//  最终值」——物化实际发生在插件 hook 之后的 adapter 内部，RCA §3.4）
+if (!statsTextAll.includes('默认→高')) {
+  console.error('smoke: recent-calls effort column must render compound label 默认→高 for defaulted records (028-F3)')
+  process.exit(1)
+}
+if (pageTextAll.includes('默认物化后的最终值')) {
+  console.error('smoke: statsHint must not claim "默认物化后的最终值" — materialization happens after the plugin hook (028-F3, RCA §3.4)')
   process.exit(1)
 }
 

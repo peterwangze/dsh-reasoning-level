@@ -13,11 +13,27 @@
  *       —— 028-F1 修复前 RED（RCA §3.1 同族）
  *  (g)  llm-deepseek 对照：升级现状 GREEN（无门控直写）；台账落盘 + 重启后禁用
  *       还原（含用户先验值恢复，防数据丢失）—— 028-F1 修复前 RED（还原半边）
+ *  (h)  (默认) 记账语义（RCA §2.2 假设 B / §4 F3(028)）：llm/stream 入口无显式
+ *       等级的调用，记账 effort 仍为 null（「(默认)」聚合桶不变），但必须另记
+ *       推导出的将物化路由默认（defaulted）—— 028-F3 修复前 RED；路由默认不被
+ *       模型能力支持时不标注（不 over-claim，现状与修复后均 GREEN）。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mount } from './harness.mjs'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { mount, callRoute } from './harness.mjs'
 import { makeStoreCtx } from './store-harness.mjs'
+
+// 真实环境防护（隔离）：本文件 (h) 驱动真实统计记账路径（settleRecord → 5s
+// persistTimer → persistStats 落盘 $DSH_HOME/storages/reasoning-level-stats.json）。
+// 不重定向 DSH_HOME 时，node:test 即便失败也会等待 pending timer 自然退出并写盘
+// （实测：失败用例 wall 3098ms > 用例时长，timer 照常触发）——测试将读写用户
+// 真实 ~/.dsh 统计文件。重定向至 %TEMP% 唯一临时目录（每进程新建，杜绝跨运行
+// boot 恢复串读上轮落盘数据）：boot 恢复 existsSync=false，落盘写入临时区，
+// 读写均零接触真实环境（本文件全部挂载统一隔离）。
+process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-reasoning-level-test-'))
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
 const FULL7 = { off: null, minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' }
@@ -145,5 +161,52 @@ test('(g) llm-deepseek 对照：升级现状 GREEN + 台账落盘 + 重启后禁
     const s2 = makeStoreCtx(store)
     await mount(s2.ctx)
     assert.equal(store.deepseek.reasoningEffort, undefined, '重启后禁用必须 unset（插件写入且原值缺省）')
+  }
+})
+
+test('(h) (默认) 记账另记将物化的路由默认：effort 恒 null + defaulted=路由默认（028-F3，修复前 RED）+ 不 over-claim 锁定', async () => {
+  const drainStream = (onStream, provider, model) => {
+    const wrapped = onStream(
+      { provider, model, messages: [] },
+      () => (async function* () { yield { type: 'finish', reason: { kind: 'stop', failure: null } } })(),
+    )
+    return (async () => { for await (const _chunk of wrapped) { /* drain：finish 触发 settleRecord */ } })()
+  }
+  // h1 路由默认 high + 模型 7 键声明（支持 high）：入口无显式等级 → 另记 defaulted='high'
+  {
+    const store = {
+      nsConfig: { enabled: true, level: 'high' },
+      piAi: glmPiAi('high'),
+      deepseek: undefined,
+    }
+    const { ctx, state } = makeStoreCtx(store)
+    await mount(ctx)
+    const onStream = state.handlers.get('llm/stream')
+    assert.ok(onStream !== undefined, 'llm/stream handler must be registered')
+    await drainStream(onStream, 'glm-local', 'glm-5.3')
+    const stats = await callRoute(state, '/reasoning-level-stats', {})
+    const rec = stats.payload.recent[0]
+    assert.equal(rec.effort, null, '(默认) 桶语义不变：入口无显式等级 effort 记 null（聚合键兼容）')
+    // 028-F3（修复前 RED）：必须另记将物化的路由默认——wire 实际携带
+    // options.reasoningEffort ?? profile.reasoning（物化发生在插件 hook 之后）
+    assert.equal(rec.defaulted, 'high', '(默认) 记录必须携带推导出的路由默认（statsHint 复合标注数据源）')
+    assert.equal(stats.payload.models['glm-local/glm-5.3'].efforts['(默认)'], 1, '聚合键保持 (默认)（持久化统计兼容，不重命名）')
+  }
+  // h2 不 over-claim：路由默认 xhigh 不在 6 键声明模型支持面内（宿主会按能力调整）→ 不标注
+  {
+    const GEN6 = { off: null, minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', max: 'max' }
+    const store = {
+      nsConfig: { enabled: true, level: 'high' },
+      piAi: { providers: { 'glm-local': { api: 'openai-completions', reasoning: 'xhigh', models: [
+        { id: 'glm-5.3', reasoningEfforts: clone(GEN6) },
+      ] } } },
+      deepseek: undefined,
+    }
+    const { ctx, state } = makeStoreCtx(store)
+    await mount(ctx)
+    const onStream = state.handlers.get('llm/stream')
+    await drainStream(onStream, 'glm-local', 'glm-5.3')
+    const stats = await callRoute(state, '/reasoning-level-stats', {})
+    assert.equal(stats.payload.recent[0].defaulted, undefined, '路由默认不被模型能力支持时不标注（不 over-claim 宿主物化结果）')
   }
 })
