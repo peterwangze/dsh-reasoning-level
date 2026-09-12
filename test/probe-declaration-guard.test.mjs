@@ -19,8 +19,8 @@
  *   (e) filter 非空 + 模型未声明 → 临时声明必须回滚删除（修复前 RED）
  *
  * F-2（MAINT-031 补看护，REVIEW-MAINT-019-R0 §4 F-2）：
- *   filtered 回滚 replace 失败分支（lib/index.js:1325-1329）此前零测试看护——回滚失败时
- *   声明停在探测窗口写入的临时全量形状（用户可见失真），persisted 经 :1180 映射 persist-error。
+ *   filtered 回滚 replace 失败分支（lib/index.js:1324-1331）此前零测试看护——回滚失败时
+ *   声明停在探测窗口写入的临时全量形状（用户可见失真），persisted 经 :1182 映射 persist-error。
  *   (g) 注入第 2 次 llm-pi-ai 写（= filtered 回滚）失败 → persist-error + 声明==临时全量形状
  *       （补看护非改行为：不注入失败时同一夹具回 pending-apply，断言非空转）
  *
@@ -176,7 +176,7 @@ test('(e) MAINT-019 P2-3: filter 非空 + 模型未声明 → 临时声明必须
 })
 
 test('(g) MAINT-031 F-2 补看护: filtered 回滚 replace 失败 → persist-error 且声明停在临时全量形状', async () => {
-  // F-2 看护对象：rollbackProbeDeclaration 的 replace 失败分支（lib/index.js:1325-1329）。
+  // F-2 看护对象：rollbackProbeDeclaration 的 replace 失败分支（lib/index.js:1324-1331；结局映射 :1182）。
   // filter 非空 + 探测前为 6 键声明 → 1st llm-pi-ai 写 = 临时全量声明（成功），
   // 2nd llm-pi-ai 写 = filtered 回滚（本用例注入失败）→ 回滚未生效。
   const piAi = {

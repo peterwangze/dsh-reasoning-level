@@ -403,6 +403,10 @@ test('(MAINT-030/F-1+T-F1+T-F2) 空作用域树：宿主树探针全部 SKIP-UNR
     const r10 = results.find((r) => r.id === 10)
     assert.match(r10.skipReason, /树布局/, `#10 残树归因必须指向树布局（T-F2，实得 skipReason：${r10.skipReason}），不得误导为死声明`)
 
+    // MAINT-034（持久看护）：#2 事件锚探针在整树零包可解析时必须走「全不可解析」分支文案（MAINT-031 项①判定基=去重包数），不得回落 partial 分支「可解析包的锚点全部命中」误导排查方向。
+    const r2 = results.find((r) => r.id === 2)
+    assert.match(r2.skipReason, /均在目标树不可解析/, `#2 整树不可解析必须按「全不可解析」归因（实得 skipReason：${r2.skipReason}）`)
+
     // F-1/T-F1（主判据）：宿主契约面断言执行数 = 0 → exit 2（溜号窗口关闭）；
     // 自有工件探针（8/9/11）PASS 不再计入该守卫。
     const verdict = doctorExit(results)
