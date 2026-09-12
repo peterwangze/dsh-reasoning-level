@@ -605,6 +605,9 @@ function probeMirrorSingleSource() {
 // dsh-client-ui-settings / dsh-client-locale 未入 devDeps 锁（本任务授权面仅
 // agent-loop/llm/host-webserver 三包），基线按 §4.2 † 预写降级为白名单比对。
 const INJECT_WHITELIST_BASELINE = ['@deepseek-ai/dsh-client-ui-settings', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-api-remotes']
+// T-F2 归因分叉依据：电池其余宿主树探针依赖的 co-tree 包清单——普遍不可解析
+// （全部缺席）⇒ 目标树是残树/布局漂移，而非死声明（BM-3 同款宽容归因）。
+const CO_TREE_HOST_PACKAGES = ['dsh-settings', 'dsh-agent-loop', 'dsh-llm', 'dsh-host-webserver', 'dsh-api-remotes']
 
 function probeClientInjectDeclaration(source) {
   const declared = declaredClientInject()
@@ -623,7 +626,20 @@ function probeClientInjectDeclaration(source) {
     const resolved = resolvePackage(source, declaredName)
     if (resolved === null) { failed = true; rows.push(`${declaredName} ✗目标树不可解析`) } else rows.push(`${declaredName}@${resolved.version} ✓`)
   }
-  if (failed) return rawFail(rows.join(' ; '), 'C6：声明的包在活树不存在 = 死声明（今日静默跳过，宿主收紧即致命）——查 HOST_PROVENANCE C6 与 package.json dsh.client.inject')
+  if (failed) {
+    // T-F2：同树其他宿主包普遍不可解析（co-tree 全缺席）时，「声明的包不可解析」
+    // 是树布局问题——按 UNRESOLVED 归因，不恒归 DRIFT「死声明」误导排查方向。
+    const coTreeResolved = CO_TREE_HOST_PACKAGES.filter((name) => resolvePackage(source, name) !== null).length
+    if (coTreeResolved === 0) {
+      return {
+        status: 'SKIP', skip: 'UNRESOLVED',
+        skipReason: `声明的包在目标树不可解析，且同树其他宿主包（${CO_TREE_HOST_PACKAGES.join('/')}）亦全部不可解析——树布局问题（BM-3/T-F2），不做死声明判断`,
+        evidence: rows.join(' ; '),
+        hint: '先确认树布局（--tree 指向含 @deepseek-ai/ 的 node_modules）——布局修复后死声明判定才有意义',
+      }
+    }
+    return rawFail(rows.join(' ; '), 'C6：声明的包在活树不存在 = 死声明（今日静默跳过，宿主收紧即致命）——查 HOST_PROVENANCE C6 与 package.json dsh.client.inject')
+  }
   return RESULT_PASS(`逐声明名在活树可解析：${rows.join(' ; ')}`)
 }
 
@@ -714,6 +730,23 @@ export async function runBattery(source) {
   const results = []
   for (const probe of PROBES) results.push(await runEntry(probe, source))
   return results
+}
+
+/**
+ * doctor 退出码判定（§4.3，MAINT-030 F-1/T-F1 收口——判据唯一实现点，doctor
+ * 与判别测试共用，零分叉）：executed 统计域 = requiresHostTree 条目。自有工件
+ * 探针（条目 8/9/11）零环境依赖恒可执行，不计入该守卫——否则「宿主树断言
+ * 零执行」分支永远不可达（死守卫，FEAT-002-R0 impl F-1 / test T-F1）。宿主
+ * 契约面零断言执行（如空作用域树全部 SKIP-UNRESOLVED）本身就是 exit 2 级
+ * 异常（BM-3：doctor 永不输出「全绿但宿主契约面零判定」）；FAIL 恒优先。
+ */
+export function doctorExit(results) {
+  const hostTreeIds = new Set(PROBES.filter((p) => p.requiresHostTree).map((p) => p.id))
+  const hasFail = results.some((r) => r.status === 'FAIL')
+  const hostExecuted = results.filter((r) => hostTreeIds.has(r.id)
+    && (r.status === 'PASS' || r.status === 'FAIL' || r.status === 'DRIFT')).length
+  const exitCode = hasFail ? 1 : hostExecuted === 0 ? 2 : 0
+  return { exitCode, hasFail, hostExecuted }
 }
 
 // ── doctor 辅助：宿主版本清单 + 漂移定位建议（§4.3）────────────────────────

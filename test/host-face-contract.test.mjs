@@ -44,7 +44,7 @@ import vm from 'node:vm'
 import {
   baselineSource, liveSourceFromEnv, requirePackage, runEntry, runBattery,
   loadApiRemotesContributions, descriptorOf, descriptorIdOf, checkArityTable,
-  mirrorMatches, PROBES,
+  mirrorMatches, PROBES, doctorExit, baselinePinnedVersion,
 } from './host-probes.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -372,6 +372,73 @@ test('(FEAT-002/MAINT-014) 负相自证 ×2+：伪造宿主树（锚串缺失/�
     const arity = checkArityTable(forgedContributions)
     assert.equal(arity.ok, false, 'checkArityTable 必须检出 2 参 update（MAINT-025 缺陷形状）')
     assert.ok(arity.rows.some((row) => row.includes('settings.update') && row.includes('✗')), '失配行必须指明 settings.update')
+  } finally {
+    rmSync(forgedRoot, { recursive: true, force: true })
+  }
+})
+
+// ── MAINT-030 守卫负相：doctor 宿主树零执行守卫（F-1/T-F1 收口，判据单源）──
+// 空作用域树（@deepseek-ai/ 存在但零包）= BM-3 布局漂移正例：宿主树探针必须
+// 全部 SKIP-UNRESOLVED（含条目 10 按树布局归因——T-F2），自有工件探针（8/9/11）
+// 照常执行但**不计入**零执行守卫。doctorExit 从探针模块单源导出，doctor 脚本
+// 与本测试同源消费（判据零分叉）——「宿主契约面零断言执行 = exit 2」溜号窗口
+//（FEAT-002-R0 impl F-1 / test T-F1 双流证实）就此关闭。
+test('(MAINT-030/F-1+T-F1+T-F2) 空作用域树：宿主树探针全部 SKIP-UNRESOLVED（含 #10 树布局归因）→ doctorExit 判 exit 2（宿主契约面零断言执行 ≠ 健康）', async () => {
+  const tmpBase = mkdtempSync(join(tmpdir(), 'dsh-empty-scope-'))
+  try {
+    const treeRoot = join(tmpBase, 'node_modules')
+    mkdirSync(join(treeRoot, '@deepseek-ai'), { recursive: true }) // 作用域存在但零包
+    const emptyLive = { kind: 'live', label: '空作用域树（守卫负相）', root: treeRoot }
+    const results = await runBattery(emptyLive)
+
+    const hostTreeIds = new Set(PROBES.filter((p) => p.requiresHostTree).map((p) => p.id))
+    const hostRows = results.filter((r) => hostTreeIds.has(r.id))
+    assert.ok(hostRows.length >= 8, `宿主树探针应 ≥8 条（实得 ${hostRows.length}）`)
+    for (const r of hostRows) {
+      assert.equal(r.status, 'SKIP', `空作用域树条目 #${r.id} 必须 SKIP（实得 ${r.status}）——树上无宿主工件可断言，任何执行态判定都不可信`)
+      assert.equal(r.skip, 'UNRESOLVED', `空作用域树条目 #${r.id} skip 类别必须 UNRESOLVED（实得 ${r.skip}）`)
+    }
+    // T-F2（红点）：#10（inject 存在性）不得在残树上恒归 DRIFT「死声明」——
+    // 同树其他宿主包普遍不可解析时按树布局归因（修复前本条实得 DRIFT）。
+    const r10 = results.find((r) => r.id === 10)
+    assert.match(r10.skipReason, /树布局/, `#10 残树归因必须指向树布局（T-F2，实得 skipReason：${r10.skipReason}），不得误导为死声明`)
+
+    // F-1/T-F1（主判据）：宿主契约面断言执行数 = 0 → exit 2（溜号窗口关闭）；
+    // 自有工件探针（8/9/11）PASS 不再计入该守卫。
+    const verdict = doctorExit(results)
+    assert.equal(verdict.hostExecuted, 0, `宿主树断言执行数必须为 0（实得 ${verdict.hostExecuted}）`)
+    assert.equal(verdict.exitCode, 2, `空作用域树 doctor 语义必须 exit 2（实得 ${verdict.exitCode}）——宿主契约面零断言执行本身就是异常（BM-3）`)
+    for (const r of results.filter((x) => !hostTreeIds.has(x.id))) {
+      assert.equal(r.status, 'PASS', `自有工件探针 #${r.id} 不受空树影响必须照常 PASS（且不计入零执行守卫）`)
+    }
+  } finally {
+    rmSync(tmpBase, { recursive: true, force: true })
+  }
+})
+
+// ── MAINT-030/F-3 结构化 catch 载荷：fail-closed throw 携带失配值 + 处置命令 ──
+// doctor 顶层 try/catch 将 runBattery 的 baseline fail-closed throw 映射为结构化
+// exit 2 报告（替代原始栈迹崩溃 exit 1）。本负相钉死其输出面：版本失配性质 +
+// 已安装失配值 + devDeps 锁版值 + npm ci 处置命令（ci.yml 同款）。
+test('(MAINT-030/F-3) baseline fail-closed 载荷：runBattery 版本失配 throw 必须携带已安装值 + devDeps 锁版值 + 处置命令（doctor 结构化 catch 的输出面）', async () => {
+  const forgedRoot = mkdtempSync(join(tmpdir(), 'dsh-forged-pin-'))
+  try {
+    const pkgDir = join(forgedRoot, '@deepseek-ai', 'dsh-settings')
+    mkdirSync(pkgDir, { recursive: true })
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-settings', version: '9.9.9-forged' }, null, 2))
+    const forgedBaseline = { kind: 'baseline', label: '伪造基线（F-3 载荷负相）', root: forgedRoot }
+    const pinned = baselinePinnedVersion('dsh-settings')
+    await assert.rejects(
+      () => runBattery(forgedBaseline),
+      (error) => {
+        assert.match(error.message, /版本失配/, '载荷必须标明版本失配性质')
+        assert.ok(error.message.includes('9.9.9-forged'), `载荷必须含已安装失配值（实得：${error.message}）`)
+        assert.ok(pinned === undefined || error.message.includes(pinned), `载荷必须含 devDeps 锁版值 ${pinned}（实得：${error.message}）`)
+        assert.match(error.message, /npm ci --legacy-peer-deps/, '载荷必须含处置命令（与 ci.yml 同款）')
+        return true
+      },
+      'baseline 源版本失配必须 fail-closed throw（runBattery 顶层可 catch 的结构化载荷）',
+    )
   } finally {
     rmSync(forgedRoot, { recursive: true, force: true })
   }

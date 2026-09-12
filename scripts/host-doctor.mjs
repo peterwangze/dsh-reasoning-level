@@ -16,7 +16,8 @@
  * 防误报，等待人工语义复核）。
  *
  * 退出码：0 = 无 FAIL（DRIFT 允许 0 但醒目输出）；1 = 存在 FAIL；
- * 2 = 目标树不可解析（列出已扫描路径）或零契约断言执行（本身就是异常——BM-3）。
+ * 2 = 目标树不可解析（列出解析链与已扫描候选）或宿主契约面零断言执行
+ * （宿主树探针零执行——本身就是异常，BM-3；判定与测试同源 doctorExit）。
  *
  * @module dsh-reasoning-level/scripts/host-doctor
  */
@@ -26,7 +27,7 @@ import { dirname, join } from 'node:path'
 import { resolveDshHomeSafe } from '../lib/host-compat.js'
 import {
   baselineSource, liveSourceFromEnv, normalizeTreeRoot, runBattery,
-  hostVersionManifest, provenanceFor,
+  hostVersionManifest, provenanceFor, doctorExit,
 } from '../test/host-probes.mjs'
 
 const scriptRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -56,30 +57,33 @@ function parseArgs(argv) {
 const USAGE = '用法：node scripts/host-doctor.mjs [--tree <profiles 目录或其 node_modules>]（环境变量 DSH_HOST_TREE / DSH_HOST_PACKAGES 亦可指定）'
 
 // ── 目标树解析（§4.3 顺序）─────────────────────────────────────────────────
+// MAINT-030/F-2：scanned 解析链（原始输入→归一化）在**全部**分支透传——此前
+// --tree / DSH_HOST_TREE / 别名三分支 push 后丢弃（死 push），坏树输出回退仅
+// 显示归一化根，丢失诊断链。doctor 消费方：坏树 exit 2 与零执行 exit 2 输出。
 function resolveTargetTree(cliTree) {
   const scanned = []
   if (cliTree !== undefined) {
     const root = normalizeTreeRoot(cliTree)
-    scanned.push(`--tree ${cliTree} → ${root}`)
-    return { root, origin: '--tree' }
+    scanned.push(`原始输入 --tree ${cliTree} → 归一化 ${root}`)
+    return { root, origin: '--tree', scanned }
   }
   const envSource = liveSourceFromEnv({ DSH_HOST_TREE: process.env.DSH_HOST_TREE, DSH_HOST_PACKAGES: process.env.DSH_HOST_PACKAGES })
   if (process.env.DSH_HOST_TREE !== undefined && process.env.DSH_HOST_TREE !== '') {
     const root = normalizeTreeRoot(process.env.DSH_HOST_TREE)
-    scanned.push(`DSH_HOST_TREE → ${root}`)
-    return { root, origin: 'DSH_HOST_TREE' }
+    scanned.push(`原始输入 DSH_HOST_TREE=${process.env.DSH_HOST_TREE} → 归一化 ${root}`)
+    return { root, origin: 'DSH_HOST_TREE', scanned }
   }
   if (envSource !== null && envSource.via.includes('别名')) {
-    scanned.push(`DSH_HOST_PACKAGES(别名) → ${envSource.root}`)
-    return { root: envSource.root, origin: 'DSH_HOST_PACKAGES(别名)' }
+    scanned.push(`原始输入 DSH_HOST_PACKAGES=${process.env.DSH_HOST_PACKAGES}（别名）→ 归一化 ${envSource.root}`)
+    return { root: envSource.root, origin: 'DSH_HOST_PACKAGES(别名)', scanned }
   }
   const home = resolveDshHomeSafe()
   if (home === undefined) {
-    scanned.push('resolveDshHomeSafe() = undefined（DSH_HOME 未设置且 homedir 不可用）')
+    scanned.push('原始输入 resolveDshHomeSafe() = undefined（DSH_HOME 未设置且 homedir 不可用）')
     return { root: null, origin: '缺省解析失败', scanned }
   }
   const root = join(home, 'profiles', 'node_modules')
-  scanned.push(`resolveDshHomeSafe() = ${home} → ${root}`)
+  scanned.push(`原始输入 resolveDshHomeSafe() = ${home} → 归一化 ${root}`)
   return { root, origin: `缺省解析（${home} 下 profiles/node_modules）`, scanned }
 }
 
@@ -102,15 +106,18 @@ push('dsh-reasoning-level host-doctor（FEAT-002 宿主兼容面诊断，设计 
 push(`目标树：${target.root ?? '（不可解析）'}（来源：${target.origin}）`)
 
 // 树可解析性（exit 2 判定①）：目录不存在 / 无 @deepseek-ai 作用域 = 不可解析
-let treeUsable = false
+let rootExists = false
+let scopedExists = false
 if (target.root !== null) {
-  const scopedExists = existsSync(join(target.root, '@deepseek-ai'))
-  treeUsable = existsSync(target.root) && scopedExists
+  rootExists = existsSync(target.root)
+  scopedExists = rootExists && existsSync(join(target.root, '@deepseek-ai'))
 }
+const treeUsable = rootExists && scopedExists
 if (!treeUsable) {
   push('')
-  push('✗ 目标树不可解析——已扫描路径：')
-  for (const s of target.scanned ?? [target.root ?? '(空)']) push(`  - ${s}`)
+  push('✗ 目标树不可解析——解析链（原始输入→归一化）与已扫描候选：')
+  for (const s of target.scanned) push(`  - ${s}`)
+  push(`  - 已扫描候选：${target.root ?? '(解析失败无根)'}（根目录${rootExists ? '存在' : '不存在'}，@deepseek-ai/ 作用域${scopedExists ? '存在' : '不存在'}）`)
   push('  处置：dsh plugin 安装后的标准布局为 <DSH home>/profiles/node_modules（含 @deepseek-ai/*）；')
   push('  若布局变化（BM-3），用 --tree 显式指向含 @deepseek-ai/ 的 node_modules 目录。')
   console.log(lines.join('\n'))
@@ -131,7 +138,19 @@ push(`分级：${grading === 'baseline' ? 'baseline——目标树即 devDeps �
 push('')
 
 // ── 逐触点表（§4.2 十一条，探针与判别测试共用）────────────────────────────
-const results = await runBattery(source)
+// MAINT-030/F-3：baseline 分级的 fail-closed throw（包缺席/版本失配，探针模块
+// requirePackage 抛出）在此结构化承接——替代原始栈迹崩溃 exit 1。载荷自带
+// 版本失配值（已安装 vs devDeps 锁版）与处置命令提示（ci.yml 同款 npm ci）。
+let results
+try {
+  results = await runBattery(source)
+} catch (error) {
+  push('')
+  push(`✗ 探针电池 fail-closed 中止——${error?.message ?? error}`)
+  push('  （工件源① devDeps 锁版基线解析失败即整体中止：exit 2；按上方处置命令修复后重跑。）')
+  console.log(lines.join('\n'))
+  process.exit(2)
+}
 push('逐触点表（设计 §4.2 断言清单）：')
 const symbol = { PASS: '✓', FAIL: '✗', DRIFT: '⚠', SKIP: '-' }
 for (const r of results) {
@@ -177,19 +196,21 @@ const count = (status) => results.filter((r) => r.status === status).length
 push('')
 push(`摘要：PASS=${count('PASS')}  FAIL=${count('FAIL')}  DRIFT=${count('DRIFT')}  SKIP=${count('SKIP')}（共 ${results.length} 条）`)
 
-const executed = results.filter((r) => r.status === 'PASS' || r.status === 'FAIL' || r.status === 'DRIFT').length
-const hasFail = count('FAIL') > 0
-let exitCode = 0
-if (hasFail) exitCode = 1
-else if (executed === 0) exitCode = 2
-
-if (count('DRIFT') > 0 && !hasFail) {
+// MAINT-030/F-1+T-F1 收口：退出判定与判别测试同源消费 doctorExit（探针模块
+// 唯一实现点，零分叉）——executed 仅计 requiresHostTree 条目，自有工件探针
+//（#8/9/11）不再计入该守卫。宿主契约面零断言执行（如空作用域树全部
+// SKIP-UNRESOLVED）= exit 2，溜号窗口（FEAT-002-R0 impl F-1 / test T-F1）关闭。
+const verdict = doctorExit(results)
+if (count('DRIFT') > 0 && !verdict.hasFail) {
   push(`⚠ 存在 ${count('DRIFT')} 条 DRIFT：exit 0 放行，但须按 VERIFICATION.md「DRIFT 复核 SOP」处置（复核 → 更新锚点/锚串 → 一个 commit）——长期搁置会导致 T 级锚点腐烂（BM-2 残余风险）。`)
 }
-if (executed === 0) {
-  push('✗ 零契约断言执行（全部 SKIP）——本身就是 exit 2 级异常（BM-3：doctor 输出永远不出现「全绿但零断言执行」）。')
+if (verdict.hostExecuted === 0) {
+  push('✗ 宿主契约面零断言执行（宿主树探针全部 SKIP，自有工件探针不计入本守卫）——本身就是 exit 2 级异常（BM-3：doctor 永不输出「全绿但宿主契约面零判定」）。')
+  push('  已扫描路径：')
+  for (const s of target.scanned) push(`  - ${s}`)
+  push(`  - 已扫描候选：${target.root}（@deepseek-ai/ 作用域存在但无可解析宿主包——树布局漂移正例，见上方 ⚠ SKIP-UNRESOLVED 汇总）`)
 }
-push(`退出码：${exitCode}${exitCode === 0 ? '（无 FAIL）' : exitCode === 1 ? '（存在 FAIL）' : '（树不可解析/零断言执行）'}`)
+push(`退出码：${verdict.exitCode}${verdict.exitCode === 0 ? '（无 FAIL）' : verdict.exitCode === 1 ? '（存在 FAIL）' : '（树不可解析/宿主契约面零断言执行）'}`)
 
 console.log(lines.join('\n'))
-process.exit(exitCode)
+process.exit(verdict.exitCode)
