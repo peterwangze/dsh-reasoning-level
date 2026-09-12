@@ -56,7 +56,8 @@
 | A6 | 对他人命名空间只做同 schema 内的收敛写（`llm-pi-ai` 自身声明的字段），读原值（不经脱敏视图）、写前 diff、失败回滚 | 配置损坏 → LLM 栈整体失效 |
 
 **每次升级 DSH 后**：rc 版本的事件/服务契约可能漂移（router 事故实证）。
-必须先跑第 3 节金丝雀，再让工作 profile 接触新版本。
+第一步先跑「层 -1 宿主兼容面诊断」（见第 2.5 节，FEAT-002，分钟级），
+再跑第 3 节金丝雀，最后让工作 profile 接触新版本。
 
 ## 2. 实现规约（本仓库的落地检查点）
 
@@ -91,6 +92,41 @@
   依赖策略自检、调用官方 `dsh plugin` 通道；`-Link/--link` 模式带前置自检
   （从源码目录实测解析宿主导入面 `@deepseek-ai/schemastery` / `dsh-settings`，
   缺依赖即拒绝并引导 `file:`）——杜绝 link: 缺 node_modules 导致的整机启动失败。
+
+## 2.5 dsh 升级后第一步：宿主兼容面诊断（FEAT-002）
+
+```powershell
+# 缺省——自动解析 $DSH_HOME||~/.dsh 下的 profiles/node_modules
+npm run host:doctor
+
+# 显式指定宿主树（profiles 目录或其 node_modules 皆可）
+npm run host:doctor -- --tree C:/Users/<you>/.dsh/profiles/node_modules
+# 判别测试同款活树断言：DSH_HOST_TREE=<树> node --test
+```
+
+- **输出**：断言清单逐触点表（PASS/FAIL/DRIFT/SKIP + 一行证据）+ 宿主版本
+  清单 + 逐 FAIL/DRIFT 漂移定位建议（出处台账 anchor → 锚串搜索 → 宿主
+  changelog/diff）。与判别测试共用同一探针模块（test/host-probes.mjs）——
+  测试绿 ⟺ doctor 绿，判据零分叉。全程只读零写入零网络。
+- **退出码**：`0` 无 FAIL（DRIFT 允许 0 但醒目输出）；`1` 有 FAIL；`2` 树不可
+  解析或零断言执行（先确认树布局——包不可解析 ≠ 契约 FAIL，SKIP-UNRESOLVED
+  分级归因）。
+- **分级**：T 级（源码文本锚串）断言失败在活树 = **DRIFT**（可能是宿主重构
+  而行为未变——BM-2 防误报）；在 devDeps 锁版基线 = **FAIL**（锁版不该漂）。
+  B 级（vm 加载真实工件的行为判别）失败不分源恒 FAIL。
+- **双工件源**：工件源① = devDeps 锁版基线（CI 恒断言 fail-closed——锁版含
+  dsh-agent-loop/dsh-llm/dsh-host-webserver，事件名/校验结构/webServer 面
+  均在基线域内）；工件源② = `DSH_HOST_TREE` 活树（在场即断言/缺席即逐条
+  显式 SKIP 带原因；旧名 `DSH_HOST_PACKAGES` 保留为别名）。
+
+**DRIFT 复核 SOP（BM-2——防「忽略红灯」习惯）**：
+
+1. 复核：按 doctor 的定位建议读宿主源码，判定是「行为已变」还是「仅锚串
+   过时（重构/改名/移位，公开行为未变）」；
+2. 更新锚点/锚串：行为已变 → 按新契约同步 `lib/host-compat.js` +
+   `lib/client.js` 镜像段（**同一变更单元**）+ devDeps 锁版 bump；仅锚串
+   过时 → 更新探针锚串与 `HOST_PROVENANCE` 出处行；
+3. **一个 commit** 承载本次复核结论，判别测试红→绿闭环。
 
 ## 3. 验证流程（三层防线）
 
@@ -182,4 +218,6 @@ zstd -dc ~/.dsh/sessions/<会话目录>/session.jsonl.zstd | grep '"type":"reque
 - [ ] 新副作用全部有捕获降级路径（A4）？
 - [ ] 新钩子异常时请求路径等价于无插件（A5）？
 - [ ] `node scripts/client-smoke.mjs` 覆盖了新渲染路径？
+- [ ] 触碰了宿主契约面（host-compat.js / client.js 镜像段）？——两文件必须
+      同一变更单元，且 `npm run host:doctor` 对活树全 PASS / DRIFT 已复核；
 - [ ] 金丝雀四步过了再上工作 profile？

@@ -36,6 +36,9 @@
     "VERIFICATION.md",
     "README.md"
   ],
+  "scripts": {
+    "host:doctor": "node scripts/host-doctor.mjs"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-llm": "*",

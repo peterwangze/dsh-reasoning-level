@@ -108,7 +108,8 @@ dsh plugin --profile web add file:/path/to/dsh-reasoning-level     # 再重新�
 
 按 [VERIFICATION.md](./VERIFICATION.md) 第 3 节执行：层 0 静态门禁（CI 已含）→
 层 1 金丝雀 profile 四步冒烟（发消息 / 设置页 / 统计端点 / 等级切换）→
-层 2 工作 profile 上线与回滚。**升级 DSH 后请先跑金丝雀再重启工作 profile。**
+层 2 工作 profile 上线与回滚。**升级 DSH 后第一步先跑 `npm run host:doctor`
+兼容面诊断（源码仓库内），再跑金丝雀，最后重启工作 profile。**
 
 ## 使用指导
 
@@ -189,6 +190,19 @@ dsh plugin --profile web remove dsh-reasoning-level    # 方式一
 - **设置页**：`settings.section` 槽位；读写走标准 wire 面（`api.settings.describe/update/mutate`、`api.llm.models` 能力探测）。
 
 依赖契约（v0.6.0）：`dependencies` 恒为空；`@deepseek-ai/*` 全部为 `peerDependencies`（`*`），由 DSH 维护的 `profiles/node_modules` 平坦回退树解析（dsh-app-boot 的 out-of-tree 官方契约）。宿主 base 组合的 `settings` / `llm` 必需，`llm-pi-ai` / `llm-deepseek` 缺席时自动跳过对应部分；浏览器侧为 web profile 默认组合。
+
+### 宿主兼容面与升级诊断（v0.7.6，host-doctor）
+
+插件对 DSH 宿主的全部契约性依赖（事件名 / 服务名 / 命名空间 / 方法面 / 元数 / 信封形状）收敛在单一模块 `lib/host-compat.js`（客户端面为 `lib/client.js` 内嵌镜像段，机器锚定两平面一致），每条触点携带宿主出处台账——dsh 升级适配的改动面被收敛到"单模块 + 镜像段 + devDeps 锁版行"。
+
+**dsh 升级后第一步**（源码仓库内运行，分钟级给出逐触点结论）：
+
+```sh
+npm run host:doctor                      # 缺省自动解析 ~/.dsh/profiles/node_modules
+npm run host:doctor -- --tree <宿主树>   # 显式指定（profiles 目录或其 node_modules）
+```
+
+输出 11 条触点的 PASS / FAIL / DRIFT / SKIP 表 + 宿主版本清单 + 漂移定位建议；退出码 `0` 无 FAIL / `1` 有 FAIL / `2` 树不可解析。与 CI 判别测试共用同一探针模块（判据零分叉），全程只读。DRIFT 处置 SOP 见 [VERIFICATION.md](./VERIFICATION.md) 第 2.5 节。
 
 ## License
 
