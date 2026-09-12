@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.6 (2026-09-14)
+
+### Added
+- **宿主兼容看护体系（FEAT-002，面向源码仓库开发者）**：①判别测试升级为**双工件源**——工件源① devDeps 锁版基线（CI 恒断言、fail-closed），工件源② `DSH_HOST_TREE` 环境变量指向活宿主树（在场即断言、缺席逐条显式 SKIP）——逐触点以真实宿主工件断言（导出面 / 函数逐字节 / 事件名存续 / RPC 方法集与元数 / effort 校验结构），杜绝「测试桩抄适配层假设自证」的 mock 假绿；②新增 `npm run host:doctor` 一条命令诊断——11 条触点 PASS / FAIL / DRIFT / SKIP 逐项表 + 宿主版本清单 + 漂移定位建议（分钟级、全程只读），与 CI 判别测试共用同一探针模块（判据零分叉）；③devDeps 基线增锁 `@deepseek-ai/dsh-agent-loop` / `dsh-llm` / `dsh-host-webserver`（@0.1.2-rc.1，非运行时依赖）——事件名 / 校验结构 / webServer 面全部落入 CI 基线断言域。**dsh 升级的兼容问题发现路径从「用户报障」提前到「doctor 一跑 + CI 判别测试当日红」**。
+- **doctor 零执行守卫收口（MAINT-030）**：host-doctor 指向的宿主树零断言执行（如空作用域树）时退出码 2 fail-closed——修复空树误报健康（exit 0）的溜号窗口；随修坏树扫描输出透传、异常结构化报错、残树归因分级（SKIP-UNRESOLVED ≠ 契约 FAIL）。
+
+### Changed
+- **宿主依赖边界架构演进（FEAT-001，内部架构演进、行为等价）**：对 DSH 宿主的全部契约性依赖（事件名 / 服务名 / 命名空间接缝 / RPC 方法面 / 元数 / 信封形状）收敛到单一模块 `lib/host-compat.js`（客户端面为 `lib/client.js` 内嵌镜像段，机器锚定两平面一致），每条触点携带宿主出处台账（包名 + 版本 + 源码行）——**dsh 升级适配的改动面收敛到「单模块 + 镜像段 + devDeps 锁版行」单点**。运行时行为零变更。
+- **dsh 0.1.5-rc 兼容性实证与声明面清理（MAINT-029）**：v0.7.5 全部宿主触点经 0.1.5-rc.2 宿主树逐项静态核对**全兼容**（dsh-settings 导出面一致、`parseSettingsNamespace` 函数体逐字节一致、4 事件名存续、api-remotes settings RPC 7 方法集一致、effort 校验结构未变、传递依赖字节级一致——报告 `docs/host-compat/analysis-0.1.5.md`）；并移除自首版遗留的 `@deepseek-ai/dsh-client-runtime` **死 inject 声明**（0.1.5 宿主树不存在该包、原生 client 插件均不声明——清理后 inject 对齐原生最小集）。
+- 无 breaking changes；无用户数据迁移、无设置 schema 变更；运行时依赖策略不变（dependencies 恒空、peers `*`）；无 Feature Flag 变更。
+- 版本号 0.7.5 → 0.7.6（PATCH：兼容性实证 + 内部架构演进 + 看护工具，无新用户功能面、无 breaking、无运行时依赖变更）。
+
+### Notes
+- **升级注记**：0.7.5 → 0.7.6 **无用户数据迁移、无设置 schema 变更、行为等价**（内部架构演进）——升级即得，无需任何用户操作。已知边界：`npm run host:doctor` 为**源码仓库开发态工具**（npm 安装包不含 scripts/，需在源码仓库内运行；README 已明示）。
+- **向后兼容（回退安全）**：本版零新增持久字段、零设置 schema 变更，回退 0.7.5 无冲突。
+- 已知遗留：MAINT-031（P3：probeEventNames 不可达分支文案 + 分析报告时间戳标注小修，后续版本处理）。
+- 发布范围 = MAINT-029 + FEAT-001 + FEAT-002 + MAINT-030 + DOC-002（910baed / 798b874 + 582d358 / b473976 + f369e7f / f393921 / a0ef3d6 + 版本收口）；质量依据：各任务审查全闭环（Code / Design / Test Reviewer 终态 APPROVED_WITH_NOTES unresolved_blockers=0）+ 全量回归 80/80 + client-smoke 5 组件 + host-doctor 活树（0.1.5-rc.2）11/11 PASS + `npm pack` 资产核验（total 9）。
+
+---
+
 ## 0.7.5 (2026-09-06)
 
 ### Fixed
