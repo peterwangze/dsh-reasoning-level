@@ -27,4 +27,12 @@ test('(MAINT-021) 宿主行在无 settingsNamespace 导出的 dsh-settings（0.1
   })
   assert.equal(exitCode, 0, `host half failed to import under new-generation dsh-settings shape: ${stderr}`)
   assert.match(stdout, /IMPORT OK/)
+  // FEAT-001（设计 §3.5-3）：接缝迁入 lib/host-compat.js 后，诊断面
+  // settingsNamespaceOrigin 在旧宿主形状存根下必须报告 local-fallback——
+  // 包内导出缺席 → 本地同源回退校验器生效（迁移前后生效路径零变更）。
+  assert.match(
+    stdout,
+    /SETTINGS NAMESPACE ORIGIN: local-fallback/,
+    'settingsNamespaceOrigin 应报告 local-fallback（存根无 settingsNamespace 导出，回退路径必须生效）',
+  )
 })

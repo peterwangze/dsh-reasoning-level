@@ -29,6 +29,7 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
+    "lib/host-compat.js",
     "cordis.patch.yml",
     "install.ps1",
     "install.sh",

@@ -10,6 +10,10 @@ register(new URL('./redirect-no-brand.mjs', import.meta.url).href)
 try {
   await import('../../lib/index.js')
   console.log('IMPORT OK')
+  // FEAT-001（§3.5-3）：接缝迁入 host-compat 后，诊断面 origin 在同一重定向
+  // 存根下必须报告 local-fallback（包内导出缺席 → 本地同源回退生效）。
+  const hostCompat = await import('../../lib/host-compat.js')
+  console.log('SETTINGS NAMESPACE ORIGIN: ' + hostCompat.settingsNamespaceOrigin)
 } catch (error) {
   console.error('IMPORT FAILED: ' + String(error?.message ?? error))
   process.exitCode = 1
