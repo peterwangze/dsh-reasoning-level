@@ -288,6 +288,11 @@ const EVENT_ANCHORS = [
   { key: 'agentRequestError', pkg: 'dsh-agent-loop', wrap: (v) => `"${v}"` },
   { key: 'llmStream', pkg: 'dsh-llm', wrap: (v) => `"${v}"` },
 ]
+// 锚点包的**去重**集合（4 锚 → 3 包）：全不可解析判定必须以包数为基。MAINT-031 项①
+// 修前比的是 EVENT_ANCHORS.length（4 锚）vs unresolvedPkgs（Set 去重 ≤3 包）——恒不可达，
+// 整树不可解析时落入 partial 分支文案「可解析包的锚点全部命中」误导排查方向。本集合
+// 由 EVENT_ANCHORS 派生（单一事实源）：改锚表即同步，不会二次漂移。
+const EVENT_ANCHOR_PKGS = [...new Set(EVENT_ANCHORS.map((anchor) => anchor.pkg))]
 
 function probeEventNames(source) {
   const cache = new Map()
@@ -315,8 +320,11 @@ function probeEventNames(source) {
       rows.push(`${key}("${value}") → ${entry.resolved.version} ${hit.relFile}:L${hit.line}`)
     }
   }
-  if (unresolvedPkgs.size === EVENT_ANCHORS.length) {
-    return { status: 'SKIP', skip: 'UNRESOLVED', skipReason: 'dsh-settings/dsh-agent-loop/dsh-llm 均在目标树不可解析（BM-3：先确认树布局，不做契约判断）', evidence: rows.join(' ; ') }
+  // 全不可解析 = 可解析包集合为空（unresolvedPkgs ⊆ EVENT_ANCHOR_PKGS，两者等势即无包可解析）。
+  // MAINT-031 项①：判定基必须是去重包数（EVENT_ANCHOR_PKGS），不得用锚数——否则本分支恒不可达，
+  // 整树不可解析时错报「可解析包的锚点全部命中」。
+  if (unresolvedPkgs.size === EVENT_ANCHOR_PKGS.length) {
+    return { status: 'SKIP', skip: 'UNRESOLVED', skipReason: `${EVENT_ANCHOR_PKGS.join('/')} 均在目标树不可解析（BM-3：先确认树布局，不做契约判断）`, evidence: rows.join(' ; ') }
   }
   if (failed) {
     return rawFail(rows.join(' ; '), '事件名漂移 = 钩子永不触发的静默失效（三次事故同型）——查 HOST_PROVENANCE S6 各行 anchor，在目标树全文搜索旧事件名变体，必要时查宿主 changelog')

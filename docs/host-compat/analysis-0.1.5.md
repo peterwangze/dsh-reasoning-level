@@ -1,15 +1,15 @@
 # DSH 0.1.5-rc 兼容性实证分析报告
 
-> Task: MAINT-029 | 项目: dsh-reasoning-level v0.7.5 | 核对日期: 2026-09-14（Coordinator 逐项核对）
+> Task: MAINT-029 | 项目: dsh-reasoning-level v0.7.5 | 核对日期: 2026-09-12（Coordinator 逐项核对）
 >
-> 本报告所有结论均来自 2026-09-14 的逐项实证核对（静态面），证据位置行号照抄核对记录，未含任何未验证断言。运行时行为以 `node --test` 全量 + `node scripts/client-smoke.mjs` 门禁代跑为准（见文末门禁记录）。
+> 本报告所有结论均来自 2026-09-12 的逐项实证核对（静态面），证据位置行号照抄核对记录，未含任何未验证断言。运行时行为以 `node --test` 全量 + `node scripts/client-smoke.mjs` 门禁代跑为准（见文末门禁记录）。
 
 ## 1. 环境事实
 
 | 项 | 事实 |
 |---|---|
-| npm dist-tags `latest` | dist-tags 按包独立（查询时刻 2026-09-14）：`@deepseek-ai/dsh` 元包 latest=0.1.5-rc.1（发布 2026-09-10 03:00:05Z）；`@deepseek-ai/dsh-settings` 等工作区包 latest=0.0.1-rc.1 |
-| npm dist-tags `next` | `@deepseek-ai/dsh` 元包 next=0.1.5-rc.2（发布 2026-09-10 14:43:58Z） |
+| npm dist-tags `latest` | dist-tags 按包独立（查询时刻 2026-09-12）：`@deepseek-ai/dsh` 元包 latest=0.1.5-rc.1（**元包自身**发布时刻 2026-09-10 03:12:53Z，npm view @deepseek-ai/dsh time 实测）；`@deepseek-ai/dsh-settings` 等工作区包 latest=0.0.1-rc.1 |
+| npm dist-tags `next` | `@deepseek-ai/dsh` 元包 next=0.1.5-rc.2（**元包自身**发布时刻 2026-09-10 14:57:10Z，同上实测） |
 | 现网宿主树 | `C:/Users/peter/.dsh/profiles/node_modules/@deepseek-ai/*` 工作区包 = 0.1.5-rc.2 |
 | 本仓库 devDeps 基线 | 0.1.2-rc.1 |
 | 核对方式 | v0.7.5 插件全部宿主触点 × 0.1.5-rc.2 宿主树静态逐项比对（0.1.2-rc.1 作差异基线） |
@@ -34,7 +34,7 @@
 
 **现象**：v0.7.5 `package.json` 的 `dsh.client.inject` 数组含 4 项，其中 `"@deepseek-ai/dsh-client-runtime"` 为死声明。
 
-**实证依据**（全部为 2026-09-14 核对所得）：
+**实证依据**（全部为 2026-09-12 核对所得）：
 
 1. **0.1.5 宿主树不存在该包**：对现网宿主树实测 `Test-Path` 返回 False，且全树 grep 零引用。
 2. **原生 client 插件均不声明**：宿主树 47 个 `dsh-client*` 包的 package.json 实测全部不含该 inject 项。

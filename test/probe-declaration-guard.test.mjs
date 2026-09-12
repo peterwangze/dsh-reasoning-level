@@ -18,6 +18,12 @@
  *   (d) filter 缺省 / 空数组 → 收敛行为不变（回归；修复前后 GREEN）
  *   (e) filter 非空 + 模型未声明 → 临时声明必须回滚删除（修复前 RED）
  *
+ * F-2（MAINT-031 补看护，REVIEW-MAINT-019-R0 §4 F-2）：
+ *   filtered 回滚 replace 失败分支（lib/index.js:1325-1329）此前零测试看护——回滚失败时
+ *   声明停在探测窗口写入的临时全量形状（用户可见失真），persisted 经 :1180 映射 persist-error。
+ *   (g) 注入第 2 次 llm-pi-ai 写（= filtered 回滚）失败 → persist-error + 声明==临时全量形状
+ *       （补看护非改行为：不注入失败时同一夹具回 pending-apply，断言非空转）
+ *
  * 全程走真实执行路径（apply → 路由处理器 → probeModelLevels/applyProbeResults），
  * 断言对象为 settings.replace 实际写入值与 state.piAiSection 落定值，无桩对桩。
  */
@@ -167,6 +173,40 @@ test('(e) MAINT-019 P2-3: filter 非空 + 模型未声明 → 临时声明必须
   assert.equal(getModelReasoningEfforts(state, 'gw', 'm'), undefined)
   assert.equal(r.payload.persisted, 'pending-apply')
   assert.equal(replaceCallsFor('llm-pi-ai', state).length, 2)
+})
+
+test('(g) MAINT-031 F-2 补看护: filtered 回滚 replace 失败 → persist-error 且声明停在临时全量形状', async () => {
+  // F-2 看护对象：rollbackProbeDeclaration 的 replace 失败分支（lib/index.js:1325-1329）。
+  // filter 非空 + 探测前为 6 键声明 → 1st llm-pi-ai 写 = 临时全量声明（成功），
+  // 2nd llm-pi-ai 写 = filtered 回滚（本用例注入失败）→ 回滚未生效。
+  const piAi = {
+    providers: { gw: { api: 'openai-completions', models: [{ id: 'm', reasoningEfforts: { ...GENERATED_SIX_KEYS } }] } },
+  }
+  let state
+  const writeAttempts = []
+  const { ctx, state: _state } = makeCtx({
+    nsConfig: { enabled: false, statsPublic: true },
+    piAiSection: piAi,
+    stream: validatingStream(() => state, {}),
+    replaceImpl: (ns, value) => {
+      if (ns !== 'llm-pi-ai') return undefined
+      writeAttempts.push(value)
+      if (writeAttempts.length === 2) throw new Error('injected: filtered rollback replace failed')
+      return undefined
+    },
+  })
+  state = _state
+  await mount(ctx)
+
+  const r = await callRoute(state, '/reasoning-level-stats/probe', { provider: 'gw', model: 'm', levels: ['low', 'high'] })
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.payload.working.sort(), ['high', 'low'])
+  // 分支锚定：恰 2 次写尝试且第 2 次（回滚）失败——证明断言落在回滚失败分支，而非其他 SKIP 归因
+  assert.equal(writeAttempts.length, 2, 'llm-pi-ai 写尝试应为 2 次（临时声明 + filtered 回滚）')
+  // 回滚失败经 convergeResult.skipped==='replace-failed' → persist-error（不得谎报 pending-apply）
+  assert.equal(r.payload.persisted, 'persist-error', '回滚 replace 失败必须报 persist-error')
+  // 回滚未生效 → 声明停在探测临时全量形状（该分支的可见失真面，看护目标即此处）
+  assert.deepEqual(getModelReasoningEfforts(state, 'gw', 'm'), GENERATED_FULL_VOCAB)
 })
 
 test('(f) MAINT-019 P2-1: boot 重算（applyPiAi）不改写手写 7 键全量 wire（DEC-012；不回归）', async () => {

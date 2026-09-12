@@ -5,9 +5,9 @@
 | 任务 | FEAT-001（设计产出；本文同时作为 FEAT-002 的设计输入） |
 | 项目 | dsh-reasoning-level v0.7.5 → 目标 0.7.6 |
 | 作者 | Architect Agent（治理工作流 stage-architecture） |
-| 日期 | 2026-09-14 |
+| 日期 | 2026-09-12 |
 | 状态 | Proposed（待 Design Reviewer 审查 + Coordinator 呈报用户） |
-| 事实基线 | ① 本会话实读：lib/index.js（1780 行）、lib/client.js（1109 行）、test/{host-face-contract, client-host-face-compat, settings-namespace-compat}.test.mjs、test/harness.mjs、test/fixtures/*、scripts/client-smoke.mjs、package.json；② 宿主源码实读：`C:/Users/peter/.dsh/profiles/node_modules/@deepseek-ai/dsh-client-modules`（makeRequire L300-310 / materialize L271-293 / async import L311-320 / resolveMeta+clientExportOf L637-667 / arriveGraphRow inject 静默跳过 L265-268）；③ MAINT-029 实证（Coordinator 2026-09-14 逐项核对，v0.7.5 × dsh 0.1.5-rc.2 静态面全兼容，唯 inject 死声明缺陷） |
+| 事实基线 | ① 本会话实读：lib/index.js（1780 行）、lib/client.js（1109 行）、test/{host-face-contract, client-host-face-compat, settings-namespace-compat}.test.mjs、test/harness.mjs、test/fixtures/*、scripts/client-smoke.mjs、package.json；② 宿主源码实读：`C:/Users/peter/.dsh/profiles/node_modules/@deepseek-ai/dsh-client-modules`（makeRequire L300-310 / materialize L271-293 / async import L311-320 / resolveMeta+clientExportOf L637-667 / arriveGraphRow inject 静默跳过 L265-268）；③ MAINT-029 实证（Coordinator 2026-09-12 逐项核对，v0.7.5 × dsh 0.1.5-rc.2 静态面全兼容，唯 inject 死声明缺陷） |
 
 > 设计纪律声明：本文所有宿主行为描述均有上述实读出处；无法验证的假设在附录 A 显式标记（编号 A-n）。没有出处标注的宿主断言不存在于本文。
 
@@ -29,7 +29,7 @@
 **范围内**：lib/host-compat.js 新模块的 API 定义与消费关系；client.js 内嵌镜像段的形态与一致性锚定机制；判别测试双工件源机制与逐触点断言清单；scripts/host-doctor.mjs 行为规格；package.json 变更面（files[]/scripts/devDeps）。
 
 **范围外（首版不做）**：
-- ~~MAINT-029 的 `@deepseek-ai/dsh-client-runtime` 死声明清理~~ **已完成**（commit 910baed，2026-09-14，MAINT-029 审查闭环）——`dsh.client.inject` 现为三名；该触点转为断言清单条目 10 的回归守护，防死声明再引入；
+- ~~MAINT-029 的 `@deepseek-ai/dsh-client-runtime` 死声明清理~~ **已完成**（commit 910baed，2026-09-12，MAINT-029 审查闭环）——`dsh.client.inject` 现为三名；该触点转为断言清单条目 10 的回归守护，防死声明再引入；
 - 乐观并发写（expectedRevision 实际传值——现状恒 undefined 无条件写入，MAINT-025 测试注释已登记为后续独立任务）；
 - 任何构建工具链引入（§3.2 方案 B 排除理由）；
 - 宿主行为变更的自动适配（本设计是**发现与收敛**机制，不是自愈机制——适配仍由人执行，但改动面被收敛到单点）。
@@ -68,7 +68,7 @@
 | C3 | hostApiFace 适配层（L1021-1078）：`ctx.get('remote.'+name)` 惰性解析 + `envelopeOf` 旧信封 `{result:{ok,value|error}}` 收敛 + 命名空间缺失 fail-loud | dsh-api-remotes typed remote | T2/T3 | client-host-face-compat（fail-loud 用例）+ host-face-contract（信封直面形状） | 直面形状变更 = 读写链断裂（半显式——P8 结构化错误进页面） | MAINT-022 |
 | C4 | remote.settings describe(0)/update(3)/mutate(3) 元数与参数表 + session.modelCatalog(0)（含第三参 expectedRevision 显式占位语义） | dsh-api-remotes 描述符（0.1.2-rc.1 与 0.1.5-rc.2 方法集实证一致） | T2 | **test/host-face-contract.test.mjs（真实工件判别，Half A/B 双半）** | 2 参转发 = 网关元数守卫 RPC 前 throw = 「保存失败」 | MAINT-025（本触点事故本体） |
 | C5 | `ctx.get('locale').getSnapshot().active`（L1090-1097）+ `ctx.slots.inject/register`（L1099-1102，settings.section list slot + order/label 契约） | dsh-client-locale / dsh-client-ui slots | T2 | client-smoke + compat 测试（桩级） | 静默降级（locale 回退 zh；slots 形状变 = 注册失败） | MAINT-023（F8 locale 重注册遗留） |
-| C6 | package.json `dsh.client.inject` **三名**（dsh-client-ui-settings / dsh-client-locale / dsh-api-remotes，与 native dsh-client-ui-settings-models 参照一致——死声明 `@deepseek-ai/dsh-client-runtime` 已于 commit 910baed 清理〔MAINT-029，2026-09-14〕；arriveGraphRow 对未知名静默跳过 L265-268） | dsh-client-modules boot graph | T3 | 条目 10（回归守护——断言声明名单 ⊆ 宿主可用包集，防死声明再引入） | 宿主未来收紧严格校验 = 激活失败（致命） | MAINT-029 |
+| C6 | package.json `dsh.client.inject` **三名**（dsh-client-ui-settings / dsh-client-locale / dsh-api-remotes，与 native dsh-client-ui-settings-models 参照一致——死声明 `@deepseek-ai/dsh-client-runtime` 已于 commit 910baed 清理〔MAINT-029，2026-09-12〕；arriveGraphRow 对未知名静默跳过 L265-268） | dsh-client-modules boot graph | T3 | 条目 10（回归守护——断言声明名单 ⊆ 宿主可用包集，防死声明再引入） | 宿主未来收紧严格校验 = 激活失败（致命） | MAINT-029 |
 | C7 | stats 端点直连 `fetch('/reasoning-level-stats…')` + `window.setInterval/clearInterval`（StatsPanel） | dsh-host-webserver 挂载面（自注册路由，非宿主 API） | 自有面 | client-smoke fetch 桩 | 自有路由，不依赖宿主 API 形状（低风险） | — |
 
 **盘点结论**：11 服务端触点 + 7 客户端触点中，仅 4 项有真实工件级守护（C4 强、C2/C3 桩级强、S2/S3 存根级），S6/S8（事件名/字段名——三次事故同根的静默失效类）完全裸奔，C6 死声明亦仅靠人工核对发现（现已清理并转条目 10 守护）。这是 FEAT-002 断言清单的优先级依据。
@@ -325,8 +325,8 @@ dsh 发布新版 → 用户/维护者跑 npm run host:doctor --tree <新树>
 ### DEC-0XX：dsh 宿主依赖边界单点化（lib/host-compat.js + 镜像段 + 双工件源判别守护）
 
 - **标题**：dsh-reasoning-level 宿主依赖边界架构演进——host-compat 单点契约模块、客户端镜像段与双工件源判别守护（FEAT-001+FEAT-002，v0.7.6）
-- **日期**：2026-09-14
-- **背景**：三次 dsh 升级事故同根——插件散落耦合宿主内部面：MAINT-021（dsh-settings 移除 settingsNamespace 公开导出→静态具名 import→加载期 SyntaxError→整机启动失败）、MAINT-022（dsh-client-connection 移除 handle.api→设置页空白）、MAINT-025（写路径第三参缺失→全部设置按钮失效）；三次均为用户报障驱动发现。2026-09-14 dsh 0.1.5-rc.2 升级实证（MAINT-029）：静态面全兼容但 18 个宿主触点中仅 4 个有真实工件级守护，事件名/字段名（静默失效类）与 inject 死声明（漂移类）完全裸奔。用户四项要求（DEC-017）：最小化宿主依赖/必须依赖解耦单独维护/严格校验看护/边界可调测性。
+- **日期**：2026-09-12
+- **背景**：三次 dsh 升级事故同根——插件散落耦合宿主内部面：MAINT-021（dsh-settings 移除 settingsNamespace 公开导出→静态具名 import→加载期 SyntaxError→整机启动失败）、MAINT-022（dsh-client-connection 移除 handle.api→设置页空白）、MAINT-025（写路径第三参缺失→全部设置按钮失效）；三次均为用户报障驱动发现。2026-09-12 dsh 0.1.5-rc.2 升级实证（MAINT-029）：静态面全兼容但 18 个宿主触点中仅 4 个有真实工件级守护，事件名/字段名（静默失效类）与 inject 死声明（漂移类）完全裸奔。用户四项要求（DEC-017）：最小化宿主依赖/必须依赖解耦单独维护/严格校验看护/边界可调测性。
 - **决策**：①新增 lib/host-compat.js 单点边界模块——登记全部宿主契约（4 事件名/服务注入/4 命名空间/settings+llm 方法面/remote 元数契约/信封形状），每条携带宿主出处（包+版本+源码行），并承载 settingsNamespace 跨版本接缝（自 index.js 迁入，行为零变更）与 resolveDshHomeSafe 单源导出（F-3 裁决：index.js/doctor/判别测试同源消费）；C5/S8 按 D6 显式豁免出注册表（fail-soft 面桩级守护 + 条目 6 锚串看护）；服务端业务代码只消费边界模块。②客户端面因宿主 makeRequire 无文件系统解析（dsh-client-modules L300-310 实证，本地 require 不可达），采用"内嵌镜像段"（≤30 行数据字面量+机器可检标记）而非共享导入，新增零环境依赖的单源一致性判别测试锚定两平面一致。③判别测试升级双工件源：devDeps 精确锁版基线（CI 恒断言 fail-closed；建议增锁 dsh-agent-loop/dsh-llm/dsh-host-webserver 使事件名/校验结构/webServer 面入基线）+ DSH_HOST_TREE 活树源（存在即断言/缺席即显式 skip）；断言锚定真实工件（vm 加载/驱动，B 级优先，T 级文本锚点失败分级为 DRIFT 防误报）。④新增 scripts/host-doctor.mjs：与判别测试共用探针模块，逐触点 PASS/FAIL/DRIFT/SKIP + 版本清单 + 漂移定位建议，全程只读；npm run host:doctor 入口，VERIFICATION.md 收编为 dsh 升级后第一步。
 - **备选方案**：(a) 构建期预打包共享模块（esbuild 内联进 client 工件）——被排除：稀释"单文件手写工件+字节级判别"质量体系、引入源-工件双份真相、安装期构建违背零副作用承诺；保留重估触发器（镜像段>100 行或共享面成逻辑）。(b) 运行时能力探测自适应——被排除：探测面自身成新 T3 依赖、静默自适应掩盖漂移且无法覆盖加载期失败（MAINT-021 机理）、与"严格看护"方向相反。(c) 现状维持仅扩测试——被排除：不收敛改动面，断言复制字面量成第三份无锚拷贝，不满足"解耦单独维护"。(d) 双平面可加载单文件（UMD）——物理不成立（makeRequire 证据一票否决）。
 - **排除理由**：见上（逐条对应 §3.2/§5 论证与实证出处）。
@@ -356,7 +356,7 @@ dsh 发布新版 → 用户/维护者跑 npm run host:doctor --tree <新树>
 | --- | --- | --- | --- |
 | A-1 | 宿主消费侧 remote face 可能暴露描述符元数据（方案 C 的前提） | **未验证** | 方案 C 已排除为独立方案，本设计不依赖此假设；若 FEAT-002 实现期顺带实证，仅作 doctor 附加诊断输出 |
 | A-2 | dsh-agent-loop/dsh-llm/dsh-host-webserver/dsh-client-ui-settings/dsh-client-locale 可作为 devDeps 精确锁版安装（同 registry 同版本族） | **未验证**（dsh-api-remotes/dsh-settings 已证可锁） | FEAT-002 实现期首步验证；不可锁则条目 2/3/5/6 降级为活树专属断言（基线覆盖面收窄，机制不变），条目 10 基线退化为白名单比对（§4.2 已注明降级路径） |
-| A-3 | 宿主树布局保持 `<root>/node_modules/@deepseek-ai/*`（profiles 平坦树，2026-09-14 实证） | 未 来 有 效 性 未 验 证 | doctor 已按 BM-3 设计 SKIP-UNRESOLVED 分级，布局变更不产生误归因 |
+| A-3 | 宿主树布局保持 `<root>/node_modules/@deepseek-ai/*`（profiles 平坦树，2026-09-12 实证） | 未 来 有 效 性 未 验 证 | doctor 已按 BM-3 设计 SKIP-UNRESOLVED 分级，布局变更不产生误归因 |
 | A-4 | 未来宿主 lib 产物保持可提取源码文本（非压缩/非打包合并）——T 级断言与条目 1 逐字节路径的前提 | 未 来 有 效 性 未 验 证 | 条目 1 双路容忍（导出路或字节路任一成立）；T 级断言失败分级 DRIFT（BM-2），不阻断发布流 |
 
 （完）
