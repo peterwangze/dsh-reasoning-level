@@ -28,6 +28,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import vm from 'node:vm'
+import { HOST_REMOTE_CONTRACT } from '../lib/host-compat.js'
+import { isStructuredFaceError } from './host-probes.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -178,9 +180,11 @@ function findButton(node, label) {
 
 test('(MAINT-022) 模块 inject 声明新面命名空间、不再依赖 connection — // TDD-GUARD-MAINT-022', () => {
   const factoryExports = loadClient()
+  // FEAT-002：期望值消费 lib/host-compat.js 契约常量（单一清单——本断言是
+  // client 工件导出面 vs 注册表的跨工件一致性检查，与镜像段单源域同向）。
   assert.deepEqual(
     [...factoryExports.inject].sort(),
-    ['locale', 'remote', 'remote.session', 'remote.settings', 'slots'].sort(),
+    [...HOST_REMOTE_CONTRACT.clientInject].sort(),
     'client inject must wait on remote.settings/remote.session (官方先例 dsh-client-ui-settings-models) and drop the dead connection path',
   )
 })
@@ -364,13 +368,14 @@ test('(MAINT-022) remote 命名空间缺失时 fail-loud（结构化错误，非
 
   // 适配层 api 在命名空间缺失时的行为：Promise 拒绝并携带结构化原因
   // （页面 .catch 显示「读取失败」；禁止裸 "Cannot read properties of undefined"）
+  // FEAT-002：结构化判据消费 test/host-probes.mjs 的唯一实现点（与 doctor 条目
+  // 11 同源——判据零分叉）；本用例保留页面级驱动路径（render → props.api）。
   const api = registered[0].render({}).props.api
   assert.ok(api && api.settings, '渲染 props 必须携带适配层 api')
   await assert.rejects(
     () => api.settings.describe({}),
     (error) => {
-      assert.match(error.message, /dsh-reasoning-level/, '错误必须可归属本插件')
-      assert.match(error.message, /remote\.settings|宿主|命名空间|不兼容/, '错误必须指明宿主 remote 命名空间缺失')
+      assert.ok(isStructuredFaceError(error), `错误必须可归属本插件并指明宿主命名空间缺失：${String(error?.message).slice(0, 120)}`)
       return true
     },
   )
