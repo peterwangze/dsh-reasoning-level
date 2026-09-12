@@ -8,8 +8,8 @@
 
 | 项 | 事实 |
 |---|---|
-| npm registry `latest` | `@deepseek-ai` 工作区包 0.1.5-rc.1（2026-09-10 03:12） |
-| npm registry `next` | 0.1.5-rc.2（2026-09-10 14:57） |
+| npm dist-tags `latest` | dist-tags 按包独立（查询时刻 2026-09-14）：`@deepseek-ai/dsh` 元包 latest=0.1.5-rc.1（发布 2026-09-10 03:00:05Z）；`@deepseek-ai/dsh-settings` 等工作区包 latest=0.0.1-rc.1 |
+| npm dist-tags `next` | `@deepseek-ai/dsh` 元包 next=0.1.5-rc.2（发布 2026-09-10 14:43:58Z） |
 | 现网宿主树 | `C:/Users/peter/.dsh/profiles/node_modules/@deepseek-ai/*` 工作区包 = 0.1.5-rc.2 |
 | 本仓库 devDeps 基线 | 0.1.2-rc.1 |
 | 核对方式 | v0.7.5 插件全部宿主触点 × 0.1.5-rc.2 宿主树静态逐项比对（0.1.2-rc.1 作差异基线） |
@@ -19,14 +19,14 @@
 
 | # | 触点 | 宿主包 | 两版对比结论 | 证据位置 |
 |---|------|--------|--------------|----------|
-| 1 | dsh-settings 导出面 | @deepseek-ai/dsh-settings | 两版一致：`{SettingsConflictError, SettingsProvider, default, redactSecrets}` | dsh-settings 包导出面（0.1.2-rc.1 ↔ 0.1.5-rc.2） |
+| 1 | dsh-settings 导出面 | @deepseek-ai/dsh-settings | 两版一致：`{SettingsConflictError, SettingsProvider, default, redactSecrets}`（两版 keys 完全一致均另含 `__esModule`——interop 元数据非 API） | dsh-settings 包导出面（0.1.2-rc.1 ↔ 0.1.5-rc.2） |
 | 2 | `parseSettingsNamespace` 函数体 | @deepseek-ai/dsh-settings | 0.1.2-rc.1 ↔ 0.1.5-rc.2 逐字节一致（MAINT-021 本地回退校验器仍逐字有效） | dsh-settings `parseSettingsNamespace` 函数体 |
 | 3 | 4 事件名存续 | dsh-settings / dsh-agent-loop / dsh-llm | `settings/updated`、`agent/request`、`agent/request-error`、`llm/stream` 全部存续 | `settings/updated`（dsh-settings/lib/index.js L566）、`agent/request`（dsh-agent-loop/lib/index.js L1143）、`agent/request-error`（L1088）、`llm/stream`（dsh-llm/lib/index.js L2307） |
 | 4 | `webServer.register({kind:'exact',path,handler})` | @deepseek-ai/dsh-host-webserver | 存续 | dsh-host-webserver/lib/index.js L176-178 |
 | 5 | settings RPC 方法集 + modelCatalog | @deepseek-ai/dsh-api-remotes | settings RPC 7 方法集两版一致（describe/update/mutate/replace/openSettingsDocument/openAgentPresetDirectory/canOpenAgentPresetDirectory）；`session.modelCatalog` 存续 | dsh-api-remotes/lib/client.js L5038-5221 / L8164+L8625 |
 | 6 | `resolveCallWithInfo` effort 校验结构 | @deepseek-ai/dsh-llm | 未变 | 0.1.5 L2111-2127；0.1.2 L1561-1577 |
 | 7 | `agent/request` payload `reasoningEffort` | @deepseek-ai/dsh-agent-loop | 字段 + schema 存续（`reasoningEffort: z.string().min(1)`） | dsh-agent-loop L1136-1140 / L1497 |
-| 8 | cordis / schemastery 传递依赖 | @deepseek-ai/cordis、@deepseek-ai/schemastery | cordis 4.0.1 ↔ 4.0.2 lib/index.js SHA256 一致（1729CDBF8EE40B17…）；schemastery 3.18.1 ↔ 3.18.2 index.mjs/index.cjs SHA256 一致 | 包文件 SHA256 比对 |
+| 8 | cordis / schemastery 传递依赖 | @deepseek-ai/cordis、@deepseek-ai/schemastery | cordis 4.0.1 ↔ 4.0.2 lib/index.js SHA256 一致（1729CDBF8EE40B17…）；schemastery 3.18.1 ↔ 3.18.2 lib/index.mjs、lib/index.cjs SHA256 一致 | 包文件 SHA256 比对 |
 | 9 | 服务面 API | dsh-settings / dsh-llm | `settings.register(ns, schema)`、`settings.get(ns)`、`llm.resolveModelInfo(provider, model, signal)`、`llm.stream(options)` 全部存续 | dsh-settings L281/L388、dsh-llm L2043、L2303 |
 | 10 | `dsh.client.inject` 声明 | 宿主 client 注入面 | **唯一缺陷**——详见 §3 | package.json L23（清理前） |
 
@@ -37,7 +37,7 @@
 **实证依据**（全部为 2026-09-14 核对所得）：
 
 1. **0.1.5 宿主树不存在该包**：对现网宿主树实测 `Test-Path` 返回 False，且全树 grep 零引用。
-2. **原生 client 插件均不声明**：宿主原生 client 插件（dsh-client-ui-settings-models 等 5 个）的 package.json 均不含该 inject 项。
+2. **原生 client 插件均不声明**：宿主树 47 个 `dsh-client*` 包的 package.json 实测全部不含该 inject 项。
 3. **native 参照**（dsh-client-ui-settings-models@0.1.5-rc.2 package.json）：inject = `["@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-api-remotes"]`。
 4. **静默跳过而非报错**：宿主 client-modules `arriveGraphRow`（dsh-client-modules/lib/client.js L265-268）对 graphRows 中不存在的 inject 名静默跳过——故该死声明不产生运行时故障，属无效冗余配置。
 5. **历史考古**：自首 commit 49f6582 即存在（`git log --oneline -S 'dsh-client-runtime' -- package.json` 实证仅首 commit 引入，此后无变更）。
