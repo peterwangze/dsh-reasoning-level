@@ -195,88 +195,45 @@ export function matchBrace(source, openIndex) {
 }
 
 // ── 条目 1（S2/S3）：dsh-settings 导出面 + settingsNamespace 跨版本接缝 ────
-// 导出面 ⊇ {SettingsConflictError, SettingsProvider, default, redactSecrets}（B 级 import；
-// 出处：dsh-settings lib/index.js L610 export 语句，0.1.2-rc.1/0.1.5-rc.2 双源一致）。
-// settingsNamespace 双路容忍（§4.2 条目 1）：导出路（须为 function）**或**源码提取
-// parseSettingsNamespace 且与 host-compat 本地回退归一化后一致（T 级提取）。
-const SETTINGS_EXPORT_FACE = ['SettingsConflictError', 'SettingsProvider', 'default', 'redactSecrets']
-
-/** 归一化：剔除空白/分号/花括号——`if(c){throw x}return v` ≡ `if(c)throw x;return v;`。 */
-function normalizeFnBody(body) {
-  return body.replace(/[\s;{}]/g, '')
-}
-
-/** 从宿主包源码提取 function parseSettingsNamespace 函数体（提取失败 = 路线 B 不可用）。 */
-function extractPackageValidator(sources) {
-  for (const { relFile, text } of sources) {
-    const head = text.indexOf('function parseSettingsNamespace(')
-    if (head === -1) continue
-    const open = text.indexOf('{', head)
-    const close = open === -1 ? -1 : matchBrace(text, open)
-    if (close === -1) return { ok: false, why: 'parseSettingsNamespace 函数体未闭合' }
-    return { ok: true, body: text.slice(open + 1, close), text, relFile }
-  }
-  return { ok: false, why: '源码中未找到 function parseSettingsNamespace 声明' }
-}
-
-/** 从 lib/host-compat.js 源码提取本地回退校验器函数体（`(value) => {` 全文唯一——已核验）。 */
-function extractLocalFallback() {
-  const text = readFileSync(join(repoRoot, 'lib', 'host-compat.js'), 'utf8')
-  const head = text.indexOf('(value) => {')
-  if (head === -1) return { ok: false, why: 'host-compat.js 未找到本地回退箭头函数' }
-  const open = text.indexOf('{', head)
-  const close = open === -1 ? -1 : matchBrace(text, open)
-  if (close === -1) return { ok: false, why: '本地回退函数体未闭合' }
-  return { ok: true, body: text.slice(open + 1, close), text }
-}
-
-/** 提取 NAMESPACE_PATTERN 正则字面量源文本（两侧正则值比对——名字相同值漂移的补漏）。 */
-function extractPatternLiteral(text) {
-  const m = text.match(/NAMESPACE_PATTERN\s*=\s*(\/.+?\/[a-z]*)/)
-  return m ? m[1] : null
-}
+// MAINT-035（0.2.0-rc.2 判据重写）：导出面 0.2.0 = {SettingsConflictError,
+// SettingsForms, default, redactSecrets}（B 级 import；SettingsProvider 移除，
+// 宿主内部 parseSettingsNamespace 亦不复存在）。判据 = 包可动态 import + 必需
+// 导出面齐全 + default 为可调用——settingsNamespace 导出缺席即本地回退路径
+//（0.2.0 常态，MAINT-035 后是唯一路径）；导出在场（古树）仍按路线 A 容忍。
+// 实际导出面清单 INFO 化进证据（人机共读），不参与 FAIL 判定。
+const SETTINGS_EXPORT_FACE = ['SettingsConflictError', 'SettingsForms', 'default', 'redactSecrets']
 
 async function probeSettingsFace(source) {
   const pkg = requirePackage(source, 'dsh-settings')
   if (pkg === null) return { status: 'SKIP', skip: 'UNRESOLVED', skipReason: 'dsh-settings 在目标树不可解析（BM-3：包不可解析 ≠ 契约 FAIL，先确认树布局）' }
   const evidence = [`dsh-settings@${pkg.version}`]
-  // B 级：真实 import（peer 链 cordis/dsh-util-values 随工件树自身解析）
+  // B 级：真实 import（peer 链 cordis 等随工件树自身解析）
   let mod
   try {
     mod = await import(pathToFileURL(join(pkg.dir, 'lib', 'index.js')).href)
   } catch (error) {
-    return rawFail(`dsh-settings@${pkg.version} 动态 import 失败：${error?.message ?? error}`, 'S2 宿主包加载即断（MAINT-021 同型致命类）——查 peer 链 cordis/dsh-util-values 在目标树是否可解析')
+    return rawFail(`dsh-settings@${pkg.version} 动态 import 失败：${error?.message ?? error}`, 'S2 宿主包加载即断（MAINT-021 同型致命类）——查 peer 链在目标树是否可解析')
   }
   const missing = SETTINGS_EXPORT_FACE.filter((name) => mod[name] === undefined)
   if (missing.length > 0) {
-    return rawFail(`导出面缺 ${missing.join(', ')}（实得：${Object.keys(mod).sort().join(', ')}）`, 'S2 导出面断裂——命名空间导入虽跨代安全，但导出面收窄预示内部重构；查 HOST_PROVENANCE S2 后人工复核')
+    const looksPre02 = typeof mod.SettingsProvider === 'function'
+    return rawFail(
+      `导出面缺 ${missing.join(', ')}（实得：${Object.keys(mod).sort().join(', ')}）`,
+      looksPre02
+        ? '导出面仍是 0.1.x 形状（SettingsProvider 面）——本插件 v0.8.0 起仅适配 dsh ≥0.2.0-rc.2（DEC-019）：升级宿主，或在旧宿主上停留 v0.7.x'
+        : 'S2 导出面断裂——命名空间导入虽跨代安全，但导出面收窄预示内部重构；查 HOST_PROVENANCE S2 后人工复核',
+    )
   }
-  evidence.push(`导出面 ⊇ {${SETTINGS_EXPORT_FACE.join(', ')}}`)
-  // 双路容忍——路线 A：包重新导出 settingsNamespace
+  evidence.push(`导出面 ⊇ {${SETTINGS_EXPORT_FACE.join(', ')}}（实际全量：${Object.keys(mod).sort().join(', ')}）`)
+  if (typeof mod.default !== 'function' && typeof mod.default !== 'object') {
+    return rawFail([...evidence, 'default 导出非可调用/对象'].join(' | '), 'S2 default 面（SettingsForms 类）断裂——MAINT-021 同型致命')
+  }
+  // settingsNamespace 接缝：0.2.0 导出缺席 → 本地回退为唯一路径（settingsNamespaceOrigin
+  // = 'local-fallback'，非降级态）；古树导出在场 → 路线 A 容忍。
   if (typeof mod.settingsNamespace === 'function') {
-    return RESULT_PASS([...evidence, '接缝走路线 A（包导出 settingsNamespace，typeof function）'].join(' | '))
+    return RESULT_PASS([...evidence, '接缝走路线 A（包导出 settingsNamespace——古树形状，typeof function）'].join(' | '))
   }
-  // 路线 B：源码提取 + 归一化一致
-  const sources = libSources(pkg.dir)
-  const host = extractPackageValidator(sources)
-  if (!host.ok) {
-    return rawFail([...evidence, `路线 B 不可用：${host.why}；且无 settingsNamespace 导出（路线 A 亦缺）`].join(' | '), '双路皆断（§4.2 条目 1 判 FAIL）——查 HOST_PROVENANCE S3 锚（SettingsProvider 入口内部 parseSettingsNamespace），在目标树全文搜索同名函数是否改名/移位')
-  }
-  const local = extractLocalFallback()
-  if (!local.ok) return rawFail([...evidence, `host-compat 侧提取失败：${local.why}`].join(' | '), '本仓库 host-compat.js 回退段形态变更——与宿主无关，先修自有工件')
-  const hostBody = normalizeFnBody(host.body)
-  const localBody = normalizeFnBody(local.body)
-  if (hostBody !== localBody) {
-    const firstDiff = [...hostBody].findIndex((ch, i) => ch !== localBody[i])
-    const around = (s, i) => s.slice(Math.max(0, i - 10), i + 20)
-    return rawFail([...evidence, `路线 B 归一化后不一致（首个分歧@${firstDiff}：宿主 "…${around(hostBody, firstDiff)}…" vs 本地 "…${around(localBody, firstDiff)}…"）`].join(' | '), '宿主命名空间校验语义漂移（静默类）——对照 HOST_PROVENANCE S3 复核正则/报错文案后同步 host-compat.js 本地回退（同一变更单元）')
-  }
-  const hostPattern = extractPatternLiteral(host.text)
-  const localPattern = extractPatternLiteral(local.text)
-  if (hostPattern !== localPattern) {
-    return rawFail([...evidence, `NAMESPACE_PATTERN 漂移：宿主 ${hostPattern} vs 本地 ${localPattern}`].join(' | '), '命名空间品牌正则变更——复核后同步 host-compat.js（同一变更单元）')
-  }
-  return RESULT_PASS([...evidence, `接缝走路线 B（${host.relFile} parseSettingsNamespace 提取归一化一致，pattern ${hostPattern}）`].join(' | '))
+  return RESULT_PASS([...evidence, '接缝走本地回退（settingsNamespace 导出缺席——0.2.0 常态唯一路径，宿主内部 parseSettingsNamespace 已移除）'].join(' | '))
 }
 
 // ── 条目 2（S6）：事件名 ×4（T 级锚串，值取 HOST_EVENTS）────────────────────
@@ -360,10 +317,11 @@ function probeWebServerRegister(source) {
 // ── 条目 4（C4）：api-remotes RPC 集 + 元数表（B 级 vm 真实工件判别）─────────
 // 描述符 id 的 controller 前缀（真实 bundle 观测，HOST_PROVENANCE C4）。
 const CONTROLLER_OF = { settings: '@deepseek-ai/dsh-api-settings-controller', session: '@deepseek-ai/dsh-api-session-controller' }
-// settings 域超集方法面（§4.2 条目 4 实证清单：本插件消费 describe/update/mutate +
-// 同域共存 replace/openSettingsDocument/openAgentPresetDirectory/canOpenAgentPresetDirectory
-// ——超集断言防宿主收敛方法集而适配层尚存消费的静默断裂）。
-const SETTINGS_DOMAIN_SUPERSET = ['describe', 'update', 'mutate', 'replace', 'openSettingsDocument', 'openAgentPresetDirectory', 'canOpenAgentPresetDirectory']
+// MAINT-035（判据反转——与解耦哲学一致）：**我们消费的方法集 ⊆ 宿主方法集**
+//（逐方法元数断言，HOST_REMOTE_CONTRACT.methods 为消费清单）；宿主额外方法
+//（openSettingsDocument/open 等）INFO 报告进证据，不算 FAIL——消除「宿主侧
+// 新增/收敛方法即误报」的脆弱性（0.2.0 移除 openAgentPresetDirectory 双方法，
+// 旧超集断言必误报）。
 
 export function descriptorIdOf(methodKey) {
   const [domain, method] = methodKey.split('.')
@@ -443,9 +401,14 @@ async function probeApiRemotesRpc(source) {
         if (d.id === descriptorIdOf('session.modelCatalog')) modelCatalog = d
       }
     }
-    const missingSuperset = SETTINGS_DOMAIN_SUPERSET.filter((m) => !settingsIds.has(m))
-    if (missingSuperset.length > 0) {
-      return rawFail(`dsh-api-remotes@${pkg.version} settings 域方法集缺 {${missingSuperset.join(', ')}}（实得 {${[...settingsIds].sort().join(', ')}}；contributions=${contributions.length}）`, 'C4 方法集收敛——查 HOST_PROVENANCE C4 描述符锚，复核适配层消费面是否需跟随收敛')
+    // 子集判据（MAINT-035 反转）：我们消费的 settings 域方法必须在场——缺任一
+    // 即 FAIL（适配层/服务端尚存消费的静默断裂）；宿主额外方法仅 INFO 报告。
+    const consumed = Object.keys(HOST_REMOTE_CONTRACT.methods)
+      .filter((key) => key.startsWith('settings.'))
+      .map((key) => key.slice('settings.'.length))
+    const missingConsumed = consumed.filter((m) => !settingsIds.has(m))
+    if (missingConsumed.length > 0) {
+      return rawFail(`dsh-api-remotes@${pkg.version} settings 域缺本插件消费的方法 {${missingConsumed.join(', ')}}（实得 {${[...settingsIds].sort().join(', ')}}；contributions=${contributions.length}）`, 'C4 消费面断裂——查 HOST_REMOTE_CONTRACT.methods 与 client.js 镜像段（同一变更单元），复核适配层消费面')
     }
     if (modelCatalog === null) {
       return rawFail(`dsh-api-remotes@${pkg.version} session.modelCatalog 描述符缺席（contributions=${contributions.length}）`, 'C4 modelCatalog 缺席 = 模型级默认卡数据面断——查 HOST_PROVENANCE C4')
@@ -454,12 +417,14 @@ async function probeApiRemotesRpc(source) {
     if (!arity.ok) {
       return rawFail(`dsh-api-remotes@${pkg.version} 元数表失配：${arity.rows.join(' ; ')}（contributions=${contributions.length}）`, 'MAINT-025 同型：宿主网关在 RPC 前严格元数守卫——元数断裂 = 「保存失败」确定性 throw。复核 HOST_REMOTE_CONTRACT.methods 与 client.js 镜像段（同一变更单元）')
     }
-    // contributions 计数为证据非断言（0.1.2-rc.1=12 / 0.1.5-rc.2=15——宿主演进正常增量；
-    // 判别锚是方法集+元数表。地板 12 = RCA §3 Half A 实测基线，防 contribution 大面积丢失）。
+    // contributions 计数为证据非断言（0.1.2-rc.1=12 / 0.1.5-rc.2=15 / 0.2.0-rc.2=25
+    // ——宿主演进正常增量；判别锚是消费方法集+元数表。地板 12 = RCA §3 Half A
+    // 实测基线，防 contribution 大面积丢失）。
     if (contributions.length < 12) {
       return rawFail(`contributions=${contributions.length} < 12（RCA §3 Half A 实测基线地板）`, 'apply() 挂载面大面积丢失——查 bundle 形态（HOST_PROVENANCE C1）')
     }
-    return RESULT_PASS(`dsh-api-remotes@${pkg.version} contributions=${contributions.length}；settings 域 ⊇ {${SETTINGS_DOMAIN_SUPERSET.join(',')}}；modelCatalog ✓；元数表 ${arity.rows.join(' ')}`)
+    const hostExtra = [...settingsIds].filter((m) => !consumed.includes(m)).sort()
+    return RESULT_PASS(`dsh-api-remotes@${pkg.version} contributions=${contributions.length}；消费方法集 ⊆ settings 域 {${consumed.join(',')}}（逐方法元数 ✓）；宿主额外方法（INFO 不判 FAIL）：{${hostExtra.join(', ') || '（无）'}}；modelCatalog ✓`)
   } finally {
     await disposer()
   }
@@ -697,10 +662,10 @@ async function probeFailLoud() {
 // ── 探针注册表（§4.2 十一条——顺序即条目号）────────────────────────────────
 // requiresHostTree：条目 8/9/11 为自有工件探针（无源依赖，测试与 doctor 恒跑）。
 export const PROBES = [
-  { id: 1, touchpoint: 'S2/S3 dsh-settings 导出面 + settingsNamespace 接缝（双路容忍）', level: 'B+T', requiresHostTree: true, run: probeSettingsFace },
-  { id: 2, touchpoint: 'S6 事件名 ×4（settings/updated · agent/request · agent/request-error · llm/stream）', level: 'T', requiresHostTree: true, run: probeEventNames },
+  { id: 1, touchpoint: 'S2/S3 dsh-settings 导出面（0.2.0 SettingsForms）+ settingsNamespace 接缝（本地回退=常态）', level: 'B+T', requiresHostTree: true, run: probeSettingsFace },
+  { id: 2, touchpoint: 'S6 事件名 ×4（settings/document-updated · agent/request · agent/request-error · llm/stream）', level: 'T', requiresHostTree: true, run: probeEventNames },
   { id: 3, touchpoint: 'S10 webServer.register({kind:"exact",path,handler})', level: 'T', requiresHostTree: true, run: probeWebServerRegister },
-  { id: 4, touchpoint: 'C4 api-remotes RPC 集 + 元数表 === HOST_REMOTE_CONTRACT.methods', level: 'B', requiresHostTree: true, run: probeApiRemotesRpc },
+  { id: 4, touchpoint: 'C4 api-remotes 消费方法集 ⊆ 宿主方法集 + 元数表 === HOST_REMOTE_CONTRACT.methods', level: 'B', requiresHostTree: true, run: probeApiRemotesRpc },
   { id: 5, touchpoint: 'S9 dsh-llm resolveCallWithInfo effort 校验结构', level: 'T', requiresHostTree: true, run: probeLlmEffortValidation },
   { id: 6, touchpoint: 'S8 agent/request payload reasoningEffort 字段', level: 'T', requiresHostTree: true, run: probeAgentRequestEffortField },
   { id: 7, touchpoint: 'S1 schemastery 默认导出 + 使用面', level: 'B', requiresHostTree: true, run: probeSchemastery },

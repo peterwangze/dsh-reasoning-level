@@ -98,9 +98,13 @@ test('(FEAT-002/§4.1) 工件源②活树行为：缺席 → 逐条显式 SKIP �
 })
 
 // ── MAINT-025 判别核心（Half A/B）——参数化到可用工件源 ─────────────────────
-// 判别目标：适配层消费的全部 4 个数据面方法（RCA §1/#12/#13 + §6——泛化到
+// 判别目标：适配层消费的全部数据面方法（RCA §1/#12/#13 + §6——泛化到
 // 整类元数断裂）。id 派生自 HOST_REMOTE_CONTRACT.methods（单一清单）。
-const TARGET_METHODS = Object.keys((await import('../lib/host-compat.js')).HOST_REMOTE_CONTRACT.methods)
+// MAINT-035：methods 表新增 settings.replace（服务端迁移/整节写路径消费的域内
+// 方法，元数表在探针 #4 判别）——但客户端适配层只转发 describe/update/mutate/
+// modelCatalog 四方法，Half B 驱动域 = 消费子集 ADAPTER_METHODS。
+const ALL_METHOD_KEYS = Object.keys((await import('../lib/host-compat.js')).HOST_REMOTE_CONTRACT.methods)
+const ADAPTER_METHODS = ALL_METHOD_KEYS.filter((key) => key !== 'settings.replace')
 
 // Half B：加载真实插件 client.js，记录型 fake remote 捕获实传元数
 // （vm dual-face 加载器与 test/client-host-face-compat.test.mjs 同构）。
@@ -198,7 +202,7 @@ for (const source of discriminatingSources) {
       const calls = []
       await driveAdapter(loadPluginAdapter(calls))
 
-      const rows = TARGET_METHODS.map((key) => {
+      const rows = ADAPTER_METHODS.map((key) => {
         const id = descriptorIdOf(key)
         const descriptor = descriptorOf(contributions, id)
         assert.ok(descriptor, `真实 bundle 必须含 ${id} 描述符`)
@@ -216,15 +220,17 @@ for (const source of discriminatingSources) {
         assert.equal(
           forwardedCount, descriptor.parameters.length,
           `${key} 元数断裂：适配层实传 ${forwardedCount} 参，真实描述符 ${descriptor.parameters.length} 参（${id}）。\n` +
-          `宿主网关元数守卫（dsh-api-gateway lib/client.js:1626-1633）在 RPC 前即 throw——即「保存失败」根因。\n全部方法比对：\n${table}`,
+          `宿主网关元数守卫（dsh-api-gateway lib/client.js 元数守卫段）在 RPC 前即 throw——即「保存失败」根因。\n全部方法比对：\n${table}`,
         )
       }
 
-      // 实传形状判别（RCA §8-a-4）
-      const describe = rows[0]
-      const update = rows[1]
-      const mutate = rows[2]
-      const modelCatalog = rows[3]
+      // 实传形状判别（RCA §8-a-4；键定位——MAINT-035 后 methods 表含 replace，
+      // 行序不再与历史索引耦合）
+      const byKey = new Map(rows.map((row) => [row.key, row]))
+      const describe = byKey.get('settings.describe')
+      const update = byKey.get('settings.update')
+      const mutate = byKey.get('settings.mutate')
+      const modelCatalog = byKey.get('session.modelCatalog')
       assert.equal(typeof update.forwardedArgs[0], 'string', 'update 第一参 ns 必须是 string（描述符 mutate:ns=string，api-remotes:4758 同族）')
       assert.equal(update.forwardedArgs[0], 'llm-reasoning', 'update ns 必须是 llm-reasoning')
       assert.ok(update.forwardedArgs[1] && typeof update.forwardedArgs[1] === 'object' && !Array.isArray(update.forwardedArgs[1]), 'update 第二参 patch 必须是普通对象')
@@ -237,7 +243,7 @@ for (const source of discriminatingSources) {
       )
       // 写路径第三参显式占位（rest 参数长度 3 = 显式传了 undefined；透传省略 =
       // 2 参 = 本缺陷本体。值可 undefined——宿主语义 "undefined writes
-      // unconditionally"（dsh-api-settings-controller lib/index.js:443/454/467）。
+      // unconditionally"（dsh-api-settings-controller lib/index.js update/replace/mutate 写路径）。
       for (const { key, forwardedArgs } of [update, mutate]) {
         assert.equal(forwardedArgs.length, 3, `${key} 第三参 expectedRevision 必须显式占位（.d.ts number|undefined 非 optional，必须传位；值可 undefined）`)
         assert.ok(forwardedArgs[2] === undefined || (Number.isInteger(forwardedArgs[2]) && forwardedArgs[2] >= 0), `${key} 第三参必须是 undefined 或非负 revision`)
@@ -250,8 +256,8 @@ for (const source of discriminatingSources) {
   })
 }
 
-// ── 逐字复制 dsh-api-gateway lib/client.js:1626-1633（prepareInvocation 元数
-// 守卫段）。唯一替换：endpointOf(descriptor) → descriptor.id（直调用面
+// ── 逐字复制 dsh-api-gateway lib/client.js（prepareInvocation 元数守卫段，
+// 0.2.0-rc.2 复核同形）。唯一替换：endpointOf(descriptor) → descriptor.id（直调用面
 // endpoint 即 descriptor.id——RCA §3 Half A 同款消息保真替换）；直调用时
 // projection 恒 undefined。禁止"改写收敛"——守卫逐字保真才具备判别力。
 function gatewayArityGuard(descriptor, values) {
@@ -318,17 +324,14 @@ test('(FEAT-002/MAINT-014) 负相自证 ×2+：伪造宿主树（锚串缺失/�
     }
     // 伪造①：dsh-agent-loop 事件锚串全部缺失（宿主移除 agent/request 瀑布的模拟）
     forge('dsh-agent-loop', '9.9.9-forged', { 'index.js': 'export const nothing = true\n' })
-    // 伪造②：dsh-settings 导出面完好但 parseSettingsNamespace 被篡改（语义漂移模拟）
+    // 伪造②：dsh-settings 导出面退回 0.1.x 形状（SettingsProvider 面、缺
+    // SettingsForms——「宿主过旧」模拟；MAINT-035 判据下必须结构化 FAIL）
     forge('dsh-settings', '9.9.9-forged', {
       'index.js': [
         'export class SettingsConflictError extends Error {}',
         'export class SettingsProvider {}',
         'export { SettingsProvider as default }',
         'export function redactSecrets() {}',
-        'const NAMESPACE_PATTERN = /^[a-z][a-z0-9-]*$/',
-        'function parseSettingsNamespace(value) {',
-        '\treturn "forged:" + value;',
-        '}',
       ].join('\n'),
     })
     const forgedLive = { kind: 'live', label: '伪造树（负相）', root: forgedRoot }
@@ -349,10 +352,12 @@ test('(FEAT-002/MAINT-014) 负相自证 ×2+：伪造宿主树（锚串缺失/�
       'baseline 源对伪造版本必须 fail-closed throw（锁版哨兵）',
     )
 
-    // 负相 2：settingsNamespace 路线 B 校验器篡改 → 结构化 FAIL（B+T 条目不降级 DRIFT）
+    // 负相 2：导出面退回 0.1.x 形状（缺 SettingsForms）→ 结构化 FAIL，
+    // 提示语指明「宿主过旧 + 升级指引」（MAINT-035 判据：本插件仅适配 ≥0.2.0）
     const r1 = await runEntry(entry1, forgedLive)
-    assert.equal(r1.status, 'FAIL', `parseSettingsNamespace 篡改必须 FAIL（实得 ${r1.status}）：\n${fmt(r1)}`)
-    assert.match(r1.evidence, /归一化后不一致|路线 B 不可用/, '证据必须落在路线 B 的判别点上')
+    assert.equal(r1.status, 'FAIL', `导出面退回 0.1.x 形状必须 FAIL（实得 ${r1.status}）：\n${fmt(r1)}`)
+    assert.match(r1.evidence, /导出面缺/, '证据必须落在导出面判别点上')
+    assert.match(r1.hint ?? '', /0\.1\.x|0\.2\.0/, '提示必须指明宿主代次与升级指引')
 
     // 负相 3（判据函数级）：镜像判等对篡改 mirror 必须失配（R-1 域含 namespaces）
     const tampered = JSON.parse(JSON.stringify((await import('../lib/host-compat.js')).HOST_REMOTE_CONTRACT))
@@ -362,10 +367,13 @@ test('(FEAT-002/MAINT-014) 负相自证 ×2+：伪造宿主树（锚串缺失/�
     assert.equal(mirrorMatches(tampered, (await import('../lib/host-compat.js')).HOST_REMOTE_CONTRACT).ok, false, 'mirrorMatches 必须检出字段删除')
 
     // 负相 4（判据函数级）：元数表判据对 2 参 update 描述符必须失配
+    //（MAINT-035：伪造描述符集补齐 settings.replace 三参——失败必须精确落在
+    // 2 参 update 行，不因方法集缺席而早退）
     const forgedDescriptor = (key, params) => ({ id: descriptorIdOf(key), parameters: params.map((name) => ({ name })), cancellation: undefined })
     const forgedContributions = [{ descriptors: [
       forgedDescriptor('settings.describe', []),
       forgedDescriptor('settings.update', ['ns', 'patch']), // ← MAINT-025 缺陷形状
+      forgedDescriptor('settings.replace', ['ns', 'section', 'expectedRevision']),
       forgedDescriptor('settings.mutate', ['ns', 'ops', 'expectedRevision']),
       forgedDescriptor('session.modelCatalog', []),
     ] }]

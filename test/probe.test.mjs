@@ -21,7 +21,12 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeCtx, mount, callRoute, statusChunks, blacklistMutates, probeEffortsMutates, validatingStream, getModelReasoningEfforts, replaceCallsFor } from './harness.mjs'
+import { isVolatile } from '@deepseek-ai/cosmokit'
+import { makeCtx, mount, callRoute, statusChunks, blacklistMutates, probeEffortsMutates, validatingStream, getModelReasoningEfforts, replaceCallsFor, loadPlugin } from './harness.mjs'
+
+// MAINT-035（schemastery 3.18.5）：volatile 字段 resolve 后是可观察盒——按宿主
+// plainConfig 同源语义解包（生产读路径 describe().value 恒为解包后的普通数据）。
+const unwrapVolatile = (v) => (isVolatile(v) ? v.get() : v)
 
 const NS = 'llm-reasoning'
 
@@ -115,25 +120,27 @@ test('(b) MAINT-017: applyProbeResults 生成声明→替换为 working 集（�
   const pe = probeEffortsMutates(state)
   assert.equal(pe.length, 1)
   assert.deepEqual(pe[0].ops[0].value, { 'zai/m2': { off: 'disabled', low: 'low', xhigh: 'xhigh' } })
-  // schema 校验通过
-  const schema = state.schemas.get(NS)
+  // schema 校验通过（MAINT-035：自有设置 schema 改为插件入口导出的 Config——
+  // 0.2.0 起 settings.register 消失，state.schemas 不再有生产 schema）
+  const schema = (await loadPlugin()).Config
   assert.ok(schema)
   const parsed = schema({ probeEfforts: { 'zai/m2': { off: 'disabled', low: 'low', xhigh: 'xhigh' } } })
-  assert.deepEqual(parsed.probeEfforts, { 'zai/m2': { off: 'disabled', low: 'low', xhigh: 'xhigh' } })
+  assert.deepEqual(unwrapVolatile(parsed.probeEfforts), { 'zai/m2': { off: 'disabled', low: 'low', xhigh: 'xhigh' } })
 })
 
 test('(d) F1 回归：probeEfforts 值 schema = string|null（接受 disabled/null，拒绝非字符串）', async () => {
   const { ctx, state } = makeCtx({ nsConfig: { enabled: false, statsPublic: true } })
   await mount(ctx)
-  const schema = state.schemas.get(NS)
+  const schema = (await loadPlugin()).Config
   const parsed = schema({
     probeEfforts: {
       'zai/m2': { off: 'disabled', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', max: 'max' },
       'openai/m3': { off: null, low: 'low' },
     },
   })
-  assert.deepEqual(parsed.probeEfforts['zai/m2'], { off: 'disabled', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', max: 'max' })
-  assert.equal(parsed.probeEfforts['openai/m3'].off, null)
+  const pe = unwrapVolatile(parsed.probeEfforts)
+  assert.deepEqual(pe['zai/m2'], { off: 'disabled', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', max: 'max' })
+  assert.equal(pe['openai/m3'].off, null)
   assert.throws(() => schema({ probeEfforts: { 'zai/m2': { off: 123 } } }))
 })
 

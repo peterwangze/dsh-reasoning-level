@@ -95,8 +95,10 @@ test('(e) 断裂维度唯一性锁定（现状 GREEN）：无先验直写 / 同�
     await mount(ctx)
     assert.equal(store.piAi.providers['glm-local'].reasoning, 'high')
     store.nsConfig.level = 'max'
-    const onUpdate = state.handlers.get('settings/updated')
-    assert.ok(onUpdate !== undefined, 'settings/updated handler must be registered')
+    // MAINT-035：主事件名 settings/document-updated（0.2.0 契约；历史名
+    // settings/updated 亦已注册为候选——settings-face-2 测试单独断言双注册）。
+    const onUpdate = state.handlers.get('settings/document-updated')
+    assert.ok(onUpdate !== undefined, 'settings/document-updated handler must be registered')
     onUpdate('llm-reasoning')
     await settle(); await settle(); await settle()
     assert.equal(store.piAi.providers['glm-local'].reasoning, 'max', '同进程 high→max 必须可升级（现状 GREEN，RCA P2-d）')
