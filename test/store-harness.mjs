@@ -49,6 +49,7 @@ export function makeStoreCtx(store, options = {}) {
     schemas: new Map(),
     replaceCalls: [],
     mutateCalls: [],
+    updateCalls: [],
     configureCalls: [],
     injectCalls: [],
     events: [],
@@ -68,6 +69,18 @@ export function makeStoreCtx(store, options = {}) {
         { ns: 'llm-deepseek', user: clone(store.deepseek), value: clone(store.deepseek), revision: revisions.get('llm-deepseek') },
         { ns: 'agent-default-model', user: undefined, value: undefined, revision: revisions.get('agent-default-model') },
       ]
+    },
+    update(ns, patch) {
+      // MAINT-036：补齐 0.2.0 SettingsForms 全方法面（契约自检消费面包含
+      // settings.update——客户端写路径经 remote 消费同一服务实例）。服务端
+      // 代码不经 update 写，按 harness.mjs 同款记录语义 + live store 顶层合并。
+      state.updateCalls.push({ ns, patch: clone(patch) })
+      state.events.push('update:' + ns)
+      bump(ns)
+      if (ns === 'llm-reasoning' && patch !== null && typeof patch === 'object') {
+        Object.assign(store.nsConfig, clone(patch))
+      }
+      return Promise.resolve()
     },
     mutate(ns, ops) {
       state.mutateCalls.push({ ns, ops })

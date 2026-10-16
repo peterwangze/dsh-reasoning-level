@@ -92,7 +92,7 @@ export function makeCtx(options = {}) {
   //  · update/replace/mutate → 记录 + 写 user 层 + bump revision（piAi 的
   //    replaceImpl 失败语义保留——MAINT-017 收敛回滚测试依赖）
   //  · configure(presentation, owner) → 记录（返回 disposer）
-  const settings = {
+  const builtInSettings = {
     configure(presentation, owner) {
       state.configureCalls.push({ presentation: clone(presentation), owner })
       return () => {}
@@ -144,6 +144,10 @@ export function makeCtx(options = {}) {
     resolveModelInfo: options.resolveModelInfo ?? (async () => undefined),
     stream: options.stream ?? (async function* () {}),
   }
+  // MAINT-036：settingsImpl 允许整体替换设置桩（契约自检负相——缺方法/缺 entry
+  // 的旧宿主形态）；timeoutImpl 允许驱动 boot 重试链（缺省 no-op，既有测试语义
+  // 不变——entry 缺席重试在缺省桩下不推进，负相测试显式注入同步实现）。
+  const settings = options.settingsImpl ?? builtInSettings
   const webServer = {
     register({ kind, path, handler }) {
       state.routes.set(path, handler)
@@ -166,13 +170,17 @@ export function makeCtx(options = {}) {
       state.handlers.set(eventName, callback)
     },
     inject(dependencies, callback) {
-      /** 同步触发注入回调（cordis 4.0.5：服务就绪即调；settings 恒在场）。 */
+      /** 同步触发注入回调（cordis 4.0.5：服务就绪即调）；deferInject=true 模拟
+       * 极简 profile 无 settings 服务（回调永不触发——数据面自禁用负相）。 */
       state.injectCalls.push([...dependencies])
+      if (options.deferInject === true) return undefined
       const child = { settings, effect: (fn, label) => ctx.effect(fn, label) }
       callback(child)
       return child
     },
-    timeout() {},
+    timeout(fn, ms) {
+      if (options.timeoutImpl !== undefined) options.timeoutImpl(fn, ms)
+    },
   }
   return { ctx, state }
 }
