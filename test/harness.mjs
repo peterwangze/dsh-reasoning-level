@@ -82,6 +82,7 @@ export function makeCtx(options = {}) {
     updateCalls: [],     // { ns, patch }（0.2.0 面——插件服务端暂不消费，面完整性保留）
     configureCalls: [],  // { presentation, owner }（0.2.0 configure 记录）
     injectCalls: [],     // [deps]（ctx.inject 调用记录）
+    describeCalls: 0,    // describe() 调用计数（R0-P1-1 缓存判别测试观察面）
     events: [],          // 'replace:<ns>' / 'mutate:<ns>' 顺序记录（F2 断言）
     handlers: new Map(), // event -> callback（测试驱动钩子路径用）
   }
@@ -98,6 +99,7 @@ export function makeCtx(options = {}) {
       return () => {}
     },
     describe() {
+      state.describeCalls += 1
       return [
         { ns: 'llm-pi-ai', user: clone(state.piAiSection), value: state.piAiSection === undefined ? {} : clone(state.piAiSection), revision: revisions.get('llm-pi-ai') },
         { ns: 'llm-reasoning', user: clone(nsConfig), value: { ...RL_DEFAULTS, ...nsConfig }, revision: revisions.get('llm-reasoning') },
@@ -171,10 +173,12 @@ export function makeCtx(options = {}) {
     },
     inject(dependencies, callback) {
       /** 同步触发注入回调（cordis 4.0.5：服务就绪即调）；deferInject=true 模拟
-       * 极简 profile 无 settings 服务（回调永不触发——数据面自禁用负相）。 */
+       * 极简 profile 无 settings 服务（回调永不触发——数据面自禁用负相）。
+       * R0-P2-1：child.on 转接主 ctx.on（产品代码事件挂注入子 fiber；记录面
+       * 仍进 state.handlers 供测试驱动）。 */
       state.injectCalls.push([...dependencies])
       if (options.deferInject === true) return undefined
-      const child = { settings, effect: (fn, label) => ctx.effect(fn, label) }
+      const child = { settings, effect: (fn, label) => ctx.effect(fn, label), on: (n, cb) => ctx.on(n, cb) }
       callback(child)
       return child
     },

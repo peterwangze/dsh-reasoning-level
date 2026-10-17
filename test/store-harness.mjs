@@ -52,6 +52,7 @@ export function makeStoreCtx(store, options = {}) {
     updateCalls: [],
     configureCalls: [],
     injectCalls: [],
+    describeCalls: 0,
     events: [],
     handlers: new Map(),
   }
@@ -63,6 +64,7 @@ export function makeStoreCtx(store, options = {}) {
       return () => {}
     },
     describe() {
+      state.describeCalls += 1
       return [
         { ns: 'llm-pi-ai', user: clone(store.piAi), value: store.piAi === undefined ? {} : clone(store.piAi), revision: revisions.get('llm-pi-ai') },
         { ns: 'llm-reasoning', user: clone(store.nsConfig), value: { ...RL_DEFAULTS, ...store.nsConfig }, revision: revisions.get('llm-reasoning') },
@@ -127,7 +129,7 @@ export function makeStoreCtx(store, options = {}) {
     },
     inject(dependencies, callback) {
       state.injectCalls.push([...dependencies])
-      const child = { settings, effect: (fn, label) => ctx.effect(fn, label) }
+      const child = { settings, effect: (fn, label) => ctx.effect(fn, label), on: (n, cb) => ctx.on(n, cb) }
       callback(child)
       return child
     },
