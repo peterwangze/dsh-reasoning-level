@@ -147,7 +147,7 @@ dsh plugin --profile web add file:/path/to/dsh-reasoning-level     # 再重新�
 | `xhigh` | 无标准线值：不向手写模型声明（目录模型按其目录能力） |
 | `max` | 原样发送 `reasoning_effort: max`（智谱等实测支持；不支持的模型自动跳过） |
 
-### 4. 配置参考（`$DSH_HOME/settings.yaml`，一般无需手改）
+### 4. 配置参考（profile 设置覆盖层——DSH 0.2.0 起由设置页写入 profile 的 cordis.patch.yml `llm-reasoning` entry config；一般无需手改）
 
 ```yaml
 llm-reasoning:
@@ -185,11 +185,11 @@ dsh plugin --profile web remove dsh-reasoning-level    # 方式一
 # Windows: .\install.ps1 -Uninstall      macOS/Linux: ./install.sh --uninstall
 ```
 
-可选清理：把 `llm-reasoning.enabled` 改为 `false` 重启一次（还原插件写入的字段），然后删除 `settings.yaml` 的 `llm-reasoning` 节。
+可选清理：把 `llm-reasoning.enabled` 改为 `false` 重启一次（还原插件写入的字段），然后删除 profile 设置覆盖层中的 `llm-reasoning` entry config（DSH 0.2.0 起；旧版为 settings.yaml 的 `llm-reasoning` 节）。
 
 ## 工作原理（简）
 
-- **宿主行**（`- id: reasoning-level`，dual-face）：注册 `llm-reasoning` settings 命名空间；监听 `settings/updated` 把目标配置**收敛**进 `llm-pi-ai` / `llm-deepseek`（`settings.replace` 整节写，避开 mutate 的数组路径限制）；
+- **宿主行**（`- id: llm-reasoning`，dual-face，v0.8.0 起）：设置声明 = 插件 Config volatile 投影（entry id 即命名空间）；监听 `settings/document-updated` 把目标配置**收敛**进 `llm-pi-ai` / `llm-deepseek`（`settings.replace` 整节写，避开 mutate 的数组路径限制）；
 - **模型级默认**：`agent/request` 提案 waterfall 注入（仅当提案无显式等级且该模型实测支持）；
 - **统计**：`llm/stream` waterfall 只读旁路（采集 usage/finish chunk）；`webServer` 暴露 `/reasoning-level-stats` 供设置页轮询；
 - **设置页**：`settings.section` 槽位；读写走标准 wire 面（`api.settings.describe/update/mutate`、`api.llm.models` 能力探测）。
