@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.8.0 (2026-10-17)
+
+### Breaking Changes
+- **宿主要求升级：DSH ≥ 0.2.0-rc.2（MAINT-035，DEC-019）**。DSH 0.2.0 对设置系统做了架构反转——插件设置声明从 `settings.register(ns, schema)` + settings.yaml 模型改为**插件入口 Config 导出（全字段 volatile 投影）+ profile cordis.patch.yml config 覆盖层**模型，设置命名空间 = profile entry id，两代模型互斥。本版仅适配 0.2.0（单一代码路径，质量可控）；**旧宿主（0.1.x）上插件安全自禁用**——启动时契约自检发现代际不符即 log 明确指引并禁用数据面，绝不阻塞 DSH 启动（整机爆炸半径零）。
+- **升级路径变更**：从 v0.7.x 升级需**先卸载旧版再安装**（`dsh plugin remove dsh-reasoning-level` → 重新 add）——entry id 由 `reasoning-level` 改为 `llm-reasoning`（设置 ns 连续性），设置存储模型变更，先卸载避免新旧 entry 并存。
+
+### Added
+- **旧配置一次性自动迁移（DEC-019）**：宿主升级 0.2.0 时会把旧 `settings.yaml` 一次性导入各同 id entry——升级窗口内本插件未安装的用户，其旧配置（全局等级 / 模型级默认 / **一键探测固化产物 probeEfforts** / 所有权台账 applied / 最近探测回显 lastProbe）滞留在 `settings.yaml.imported`。本版安装后首次启动自动检测（新配置为空 + 滞留段存在）→ 字段白名单过滤（键集单源自 Config schema，防意外形状）→ 导入新配置模型 → `$DSH_HOME/storages/reasoning-level-migrated.json` 标记防重复（用户重置配置后不会被旧数据复活）。对 `.imported` 文件只读；迁移失败仅记日志跳过，不影响其余功能。
+- **宿主契约自检 fail-loud + 页内可见降级（MAINT-036，「升级即失效」结构性对策）**：①启动时校验全部消费面（settings describe/update/replace/mutate、llm resolveModelInfo/stream、webServer.register）——缺失即 log error + 数据面自禁用 + 统计端点下发 `contractHealth` 健康字段，**设置页页顶显示中英双语告警条**（宿主本身不受影响）——历史三次升级事故的「静默失效」形态自此变为「页内可见降级 + 指引」；②设置事件新旧名双注册（`settings/document-updated` 主名 + `settings/updated` 历史名容错）——宿主改名类漂移降级为「旧代名仍活」而非钩子静默死；③settings 服务改**运行时可选注入**（静态依赖仅 llm/timer）——无设置服务的极简 profile 插件行仍可加载；④旧宿主（0.1.x）形态识别（描述符永不出现 → 重试耗尽 fail-loud 自禁用）。
+- **describe 结果缓存（REVIEW-MAINT-035+036-R0 P1-1）**：宿主 `settings.describe()` 无缓存（每次全量 profile 目录读 + YAML 解析 + schema 序列化，实测 ~8.5ms/次），热路径（每次 agent/request 注入判定与 llm/stream 统计）逐调用触发会给每个请求加 10-40ms。现缓存 + 三重失效（设置变更事件〔宿主对所有写者 emit，含本插件自身写〕/ 自有写落定主动失效 / 5s TTL 兜底）——请求路径零影响承诺恢复。
+
+### Changed
+- 设置读写全面迁移到 0.2.0 模型（对用户透明）：自有设置 = 插件 Config volatile 声明（ns = entry id `llm-reasoning`）；跨命名空间读写（llm-pi-ai 能力声明固化 / llm-deepseek 官方路由同步 / agent-default-model 默认模型同步）统一走 `describe()` 描述符（value 有效值 / user 覆盖层），写路径 mutate/replace 形状不变；`settings.configure({auto:false})` 对齐宿主「自带设置页」原生模式。
+- devDeps 判别基线锁版 0.2.0-rc.2 全量（cordis 4.0.5 / schemastery 3.18.5），并增锁 `@deepseek-ai/dsh-llm-pi-ai` / `dsh-llm-deepseek` / `dsh-agent-default-model`——三个跨命名空间写入目标的配置 schema 全部落入 CI 判别断言域。
+- host-doctor 探针判据反转为**消费集视角**：C4 由「契约表 == 宿主方法集」改为「本插件消费的方法 ⊆ 宿主方法集（逐方法元数断言）」，宿主侧新增方法（如 `openSettingsDocument`）不再误报 FAIL——每次宿主升级的适配噪声进一步收窄；S2 导出面清单转 INFO 记录。
+- 运行时依赖策略不变（dependencies 恒空、peers `*`）；零数据破坏（旧 `probeBlacklist` 兼容字段保留，`.imported` 只读）。
+
+### Fixed
+- settings 服务重启场景事件处理器不再累积重复（挂注入子 fiber，随服务生命周期销毁重建——REVIEW R0-P2-1）；boot 的 entry 接线等待与 pi-ai 就绪等待计数拆分（REVIEW R0-P3-3）。
+
+### Notes
+- **升级注记**：0.7.x → 0.8.0 **先卸载再安装**；安装后重启 DSH，旧配置自动迁移（日志可见「旧版设置已一次性迁移」；一键探测结果在设置页回显即为迁移成功佐证）。升级前如需保险，可备份 `$DSH_HOME/settings.yaml.imported`（本插件对它只读）。
+- **回退安全**：卸载本版 → 安装 v0.7.7（要求宿主同时降回 0.1.x——两代设置模型互斥，宿主 0.2.0 上 v0.7.7 无法工作，会安全自禁用）。
+- 质量依据：Code Reviewer 终态 **APPROVED_WITH_NOTES unresolved_blockers=0**（REVIEW-MAINT-035+036-R0：宿主事实源逐项对账吻合、迁移安全性/契约自检/单源一致性/回归面/测试保真度六项全过；P1-1/P2-1/P3-3 三项发现已修复并带判别测试）+ 全量回归 **108/108** + client-smoke 5 组件 + host-doctor 双树 11/11 PASS（宿主活树 0.2.0-rc.2 + devDeps 基线）+ 隔离环境安装冒烟。
+- 发布范围 = MAINT-035（185692f）+ MAINT-036（fbf0f2c）+ 复审修复（f36c6df）+ 版本收口；用户真机重装验收（M7.7，含旧数据迁移指名验证）于发布后执行。
+
+---
+
 ## 0.7.7 (2026-09-12)
 
 ### Fixed

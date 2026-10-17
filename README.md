@@ -2,7 +2,7 @@
 
 > DeepSeek Harness（DSH）统一推理等级插件：**一个设置项，动态管理所有模型的默认思考强度**——含模型级默认与实时调用观测。
 
-[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.7.7-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
+[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.8.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
 
 ---
 
@@ -47,11 +47,14 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 
 ## 一键安装
 
-> **宿主版本要求**：v0.7.3 起设置页（客户端面）适配 DSH **0.1.2-rc.1+** 的
-> typed remote 接口；旧宿主（≤0.1.1-rc.x）上插件仍可安全加载（宿主面跨版本
-> 接缝），但设置页不出现，其余功能不受影响。v0.7.6 已对 DSH **0.1.5-rc.2**
-> 逐触点静态实证兼容（报告见 `docs/host-compat/analysis-0.1.5.md`），并清理
-> 了历史遗留的 inject 死声明。请保持宿主与插件同代升级。
+> **宿主版本要求（v0.8.0 起，BREAKING）**：本插件 v0.8.0 适配 DSH 设置系统的
+> **0.2.0 架构**（插件设置声明改为宿主 Config volatile 投影模型），要求宿主
+> **DSH ≥ 0.2.0-rc.2**。旧宿主（0.1.x）上插件**安全自禁用**——数据面不生效、
+> 日志给出明确指引，绝不阻塞 DSH 启动或运行。**从 v0.7.x 升级请先
+> `dsh plugin remove dsh-reasoning-level` 再安装本版**（entry id 与设置存储
+> 模型已变更，先卸载避免新旧 entry 并存）；安装后旧配置（含一键探测固化
+> 产物）会从 `settings.yaml.imported` **一次性自动迁移**，无需手动操作。
+> 兼容性诊断：`DSH_HOST_TREE=<宿主 node_modules 路径> npm run host:doctor`。
 
 ### 方式一（推荐）：`dsh plugin` 标准命令
 
