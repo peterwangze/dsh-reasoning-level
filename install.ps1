@@ -1,4 +1,4 @@
-# dsh-reasoning-level 安装脚本 v2（Windows / PowerShell 5.1+）
+﻿# dsh-reasoning-level 安装脚本 v2（Windows / PowerShell 5.1+）
 #
 # v0.6.0 起安装走 DSH 官方插件通道（`dsh plugin --profile <P> add <spec>`，
 # 一个 pnpm 转发器）：插件装进 profile 自己的 workspace，由 pnpm 管理，
@@ -100,7 +100,7 @@ if ($Uninstall) {
 }
 
 # 安装前自检：本包必须是「零 dependencies + 全 peer」形态（v0.6.0 契约）
-$pkg = Get-Content (Join-Path $src 'package.json') -Raw | ConvertFrom-Json
+$pkg = Get-Content (Join-Path $src 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($pkg.dependencies -and $pkg.dependencies.PSObject.Properties.Count -gt 0) {
   Write-Fail "package.json 声明了 dependencies（$($pkg.dependencies.PSObject.Properties.Name -join ', ')）——v0.6.0 契约要求为空（宿主包一律 peer）。拒绝安装以防共享依赖树被污染。"
 }
