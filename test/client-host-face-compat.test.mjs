@@ -170,6 +170,9 @@ function findText(node, needle, depth = 0) {
   if (typeof node !== 'object') return false
   // 卡片标题经组件 prop 传递（el(Card, { title })），不在文本子树里
   if (typeof node.props?.title === 'string' && node.props.title.includes(needle)) return true
+  // FEAT-004：错误反馈统一经 Toast 组件（message 在 props 里，未渲染树的文本遍历
+  // 读不到）；与 Card.title 同理按 props 兜底，语义仍是「错误文本对用户可见」。
+  if (typeof node.props?.message === 'string' && node.props.message.includes(needle)) return true
   for (const child of node.children ?? []) if (findText(child, needle, depth + 1)) return true
   return findText(node.props?.children, needle, depth + 1)
 }
@@ -257,15 +260,16 @@ test('(MAINT-022) ModelDefaults 经 session.modelCatalog 加载模型列表 — 
   const tree = fn(props)
   await sleep(10)
   assert.ok(calls.includes('session.modelCatalog'), 'remote.session.modelCatalog 必须被调用（ModelDefaults 数据面）')
-  // 模型下拉含 demo/m1（catalog groups 经适配层映射为旧 llm.models 信封）
-  const options = []
-  ;(function collectOptions(node) {
+  // 模型候选（FEAT-004：长 <select> 换成可搜索结果列表，候选行仍携带 catalog 的
+  // provider/model 键；语义 = catalog 模型可被添加，只同步选择器载体）
+  const candidates = []
+  ;(function collectCandidates(node) {
     if (node === null || node === undefined || typeof node !== 'object') return
-    if (node.$$ === 'option' && typeof node.props?.value === 'string') options.push(node.props.value)
-    for (const child of node.children ?? []) collectOptions(child)
-    collectOptions(node.props?.children)
+    if (typeof node.props?.['data-model-key'] === 'string') candidates.push(node.props['data-model-key'])
+    for (const child of node.children ?? []) collectCandidates(child)
+    collectCandidates(node.props?.children)
   })(tree)
-  assert.ok(options.includes('demo/m1'), '模型下拉必须包含 catalog 中的 demo/m1，实际：' + JSON.stringify(options))
+  assert.ok(candidates.includes('demo/m1'), '模型搜索结果必须包含 catalog 中的 demo/m1，实际：' + JSON.stringify(candidates))
 })
 
 test('(MAINT-022) change 经 remote.settings.update（全局等级变更）— // TDD-GUARD-MAINT-022', async () => {

@@ -465,6 +465,257 @@ if (!writeEntryOk) {
   process.exit(1)
 }
 
+// ── 2f. FEAT-004 §3.4.1：模型级默认改为可搜索添加（点击候选 → models 深合并）────
+// （长 <select> 移除后，「catalog 模型可被添加」的语义载体 = 候选行 data-model-key；
+//  点击即写入最高支持档 max，调用形状仍是 update({ns, patch})）
+const mdLoadedTree = await renderTwice('ModelDefaults', modelDefaultsEntry[1], {
+  ...modelDefaultsEntry[2],
+  lastProbe: STATS_FIXTURE.lastProbe,
+})
+const searchCandidates = []
+;(function collectCandidates(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (typeof node.props?.['data-model-key'] === 'string' && typeof node.props?.onClick === 'function') searchCandidates.push(node)
+  for (const child of node.children ?? []) collectCandidates(child)
+  collectCandidates(node.props?.children)
+})(mdLoadedTree)
+const addCandidate = searchCandidates.find((node) => node.props['data-model-key'] === 'demo/m1')
+if (addCandidate === undefined) {
+  console.error('smoke: model search must list catalog candidates (demo/m1) for click-to-add (FEAT-004 §3.4.1)')
+  process.exit(1)
+}
+const writesBeforeAdd = writeCalls.length
+addCandidate.props.onClick()
+await effectsRan()
+const addPatch = writeCalls.slice(writesBeforeAdd).map((call) => call.patch)
+  .find((patch) => patch !== undefined && patch.models !== undefined && patch.models['demo/m1'] === 'max')
+if (addPatch === undefined) {
+  console.error('smoke: clicking a search candidate must write models[key] = highest supported level (max) via settings.update — got ' + JSON.stringify(writeCalls.slice(writesBeforeAdd)))
+  process.exit(1)
+}
+
+// ── 2f-2. FEAT-004 §3.4.3：支持矩阵（折叠标题覆盖率 + ✓/✗/? + 来源 title）─────────
+const mdComponents = []
+collectComponents(mdLoadedTree, mdComponents)
+const matrixEntry = mdComponents.find(([name]) => name === 'SupportMatrix')
+if (matrixEntry === undefined) {
+  console.error('smoke: SupportMatrix component must render inside the model defaults card (FEAT-004 §3.4.3)')
+  process.exit(1)
+}
+const matrixDisclosure = matrixEntry[1](matrixEntry[2])
+const matrixTree = matrixDisclosure.$$ === 'component'
+  ? matrixDisclosure.tag({ ...matrixDisclosure.props, children: matrixDisclosure.children })
+  : matrixDisclosure
+const flattenText = (node) => {
+  if (typeof node === 'string') return node
+  if (typeof node === 'number') return String(node)
+  if (node === null || node === undefined || typeof node !== 'object') return ''
+  return (node.children ?? []).map(flattenText).join('')
+}
+if (!flattenText(matrixTree).includes('覆盖率 1/1 已探测')) {
+  console.error('smoke: support matrix summary must show coverage (probed/total) — got ' + flattenText(matrixTree))
+  process.exit(1)
+}
+const matrixCells = []
+;(function collectMatrixCells(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (typeof node.props?.className === 'string' && /rl-matrix-(yes|no|unknown)/.test(node.props.className)) matrixCells.push(node)
+  for (const child of node.children ?? []) collectMatrixCells(child)
+  collectMatrixCells(node.props?.children)
+})(matrixTree)
+const cellCount = (state) => matrixCells.filter((node) => node.props.className.includes('rl-matrix-' + state)).length
+// fixture：demo/m1 实测 working=[high,max] + rejected=[xhigh] → ✓×2 / ✗×1 / ?×4
+if (cellCount('yes') !== 2 || cellCount('no') !== 1 || cellCount('unknown') !== 4) {
+  console.error('smoke: support matrix must render measured ✓/✗ and unknown ? cells — got yes=' + cellCount('yes') + ' no=' + cellCount('no') + ' unknown=' + cellCount('unknown'))
+  process.exit(1)
+}
+if (!matrixCells.some((node) => node.props.title === '实测') || !matrixCells.some((node) => node.props.title === '实测拒绝')) {
+  console.error('smoke: support matrix cells must explain their source in title (实测 / 实测拒绝)')
+  process.exit(1)
+}
+
+// ── 2g. FEAT-004 §5.1/§10.3：成功写入 → 「已保存 + 撤销」→ 撤销 = 反向写 ─────────
+const afterAddPage = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
+const afterAddComponents = []
+collectComponents(afterAddPage, afterAddComponents)
+const toastEntry = afterAddComponents.find(([name]) => name === 'Toast')
+if (toastEntry === undefined || toastEntry[2].actionLabel !== '撤销'
+  || !String(toastEntry[2].message).includes('已保存')) {
+  console.error('smoke: successful write must show a 「已保存」toast with 「撤销」action (FEAT-004 §5.1)')
+  process.exit(1)
+}
+const writesBeforeUndo = writeCalls.length
+toastEntry[2].onAction()
+await effectsRan()
+const undoUnset = writeCalls.slice(writesBeforeUndo).find((call) => call.method === 'mutate'
+  && JSON.stringify(call.ops) === JSON.stringify([{ op: 'unset', path: ['models', 'demo/m1'] }]))
+if (undoUnset === undefined) {
+  console.error('smoke: undo of an added model default must reverse-write via mutate unset [models, key] — got ' + JSON.stringify(writeCalls.slice(writesBeforeUndo)))
+  process.exit(1)
+}
+
+// ── 2h. FEAT-004 §3.6.1/§5.3：统计工具栏（暂停/只看异常/排序）+ persisted 三态 ───
+const statsEntry = components.find(([name]) => name === 'StatsPanel')
+if (statsEntry === undefined) {
+  console.error('smoke: StatsPanel component must be reachable for toolbar assertions (FEAT-004 §3.6.1)')
+  process.exit(1)
+}
+const renderStats = (props) => {
+  resetHooks('StatsPanel')
+  return statsEntry[1](props)
+}
+const collectButtons = (tree) => {
+  const out = []
+  ;(function walk(node) {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (node.$$ === 'component' && node.tag?.name === 'Button' && typeof node.props?.onClick === 'function') out.push(node)
+    for (const child of node.children ?? []) walk(child)
+    walk(node.props?.children)
+  })(tree)
+  return out
+}
+const collectHeaders = (tree) => {
+  const out = []
+  ;(function walk(node) {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (node.$$ === 'th') out.push(node)
+    for (const child of node.children ?? []) walk(child)
+    walk(node.props?.children)
+  })(tree)
+  return out
+}
+const statsTree = renderStats(statsEntry[2])
+const pauseButton = collectButtons(statsTree).find((node) => flattenText(node) === '暂停刷新')
+const issueButton = collectButtons(statsTree).find((node) => flattenText(node) === '只看异常')
+if (pauseButton === undefined || issueButton === undefined
+  || pauseButton.props['aria-pressed'] !== false || issueButton.props['aria-pressed'] !== false) {
+  console.error('smoke: stats toolbar must expose 暂停刷新/只看异常 with aria-pressed=false initially (FEAT-004 §3.6.1)')
+  process.exit(1)
+}
+// Toolbar 是组件元素（meta 在 props 里），未渲染树不产生文本节点——按 props 断言
+const toolbarMetas = []
+;(function collectToolbarMeta(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (node.$$ === 'component' && node.tag?.name === 'Toolbar' && typeof node.props?.meta === 'string') toolbarMetas.push(node.props.meta)
+  for (const child of node.children ?? []) collectToolbarMeta(child)
+  collectToolbarMeta(node.props?.children)
+})(statsTree)
+if (!toolbarMetas.some((meta) => meta.includes('每 2s 刷新 · 最近 100 条'))) {
+  console.error('smoke: stats toolbar must show refresh cadence meta (每 2s 刷新 · 最近 100 条) — got ' + JSON.stringify(toolbarMetas))
+  process.exit(1)
+}
+const sortHeaders = collectHeaders(statsTree).filter((node) => node.props['aria-sort'] !== undefined)
+const callsHeader = sortHeaders.find((node) => flattenText(node).includes('调用'))
+if (callsHeader === undefined || callsHeader.props['aria-sort'] !== 'descending') {
+  console.error('smoke: model aggregate table must default-sort by calls descending with aria-sort (FEAT-004 §3.6.3)')
+  process.exit(1)
+}
+const thinkHeader = sortHeaders.find((node) => flattenText(node).includes('思考'))
+const thinkSortButton = (thinkHeader.children ?? []).find((child) => child.$$ === 'button')
+thinkSortButton.props.onClick()
+const sortedTree = renderStats(statsEntry[2])
+const sortedHeaders = collectHeaders(sortedTree).filter((node) => node.props['aria-sort'] !== undefined)
+const sortedThink = sortedHeaders.find((node) => flattenText(node).includes('思考'))
+const sortedCalls = sortedHeaders.find((node) => flattenText(node).includes('调用'))
+if (sortedThink === undefined || sortedThink.props['aria-sort'] !== 'descending'
+  || sortedCalls === undefined || sortedCalls.props['aria-sort'] !== 'none') {
+  console.error('smoke: clicking a sortable column header must move aria-sort (thinking descending, calls none) (FEAT-004 §3.6.3)')
+  process.exit(1)
+}
+const issueButtonNow = collectButtons(sortedTree).find((node) => flattenText(node) === '只看异常')
+issueButtonNow.props.onClick()
+const filteredTree = renderStats(statsEntry[2])
+if (!flattenText(filteredTree).includes('没有异常调用')) {
+  console.error('smoke: 「只看异常」must filter rows with errors===0 and no suggestion (FEAT-004 §3.6.1)')
+  process.exit(1)
+}
+const pauseButtonNow = collectButtons(filteredTree).find((node) => flattenText(node) === '暂停刷新')
+pauseButtonNow.props.onClick()
+const pausedPage = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
+const pausedComponents = []
+collectComponents(pausedPage, pausedComponents)
+const pausedStats = pausedComponents.find(([name]) => name === 'StatsPanel')
+if (pausedStats === undefined || pausedStats[2].paused !== true) {
+  console.error('smoke: 暂停刷新 must flip the page polling state passed to StatsPanel (FEAT-004 §3.6.1)')
+  process.exit(1)
+}
+const pausedTree = renderStats(pausedStats[2])
+if (!collectButtons(pausedTree).some((node) => flattenText(node) === '继续刷新' && node.props['aria-pressed'] === true)) {
+  console.error('smoke: paused toolbar must render 继续刷新 with aria-pressed=true')
+  process.exit(1)
+}
+const pausedText = flattenText(pausedTree)
+if (!pausedText.includes('最近调用') || !pausedText.includes('默认→高')) {
+  console.error('smoke: pausing stats refresh must NOT stop rendering the recent-calls table (FEAT-004 §3.6.1)')
+  process.exit(1)
+}
+// persisted 三态（§10.1）：provider 在 pi-ai 配置里 = 让用户去添加该模型；不在 = 其他适配器提供
+const copyProbe = {
+  targets: [], probing: false, progress: '', summary: '', summaryOk: true,
+  results: [
+    { key: 'demo/m3', provider: 'demo', working: [], rejected: [], blocked: [], persisted: 'skipped:not-in-pi-ai-config' },
+    { key: 'vendor/x1', provider: 'vendor', working: [], rejected: [], blocked: [], persisted: 'skipped:not-in-pi-ai-config' },
+  ],
+}
+const copyStats = { since: Date.now(), totalCalls: 0, models: {}, recent: [], blacklist: {}, lastProbe: { t: 1, models: {} } }
+const copyText = flattenText(renderStats({ ...pausedStats[2], stats: copyStats, probe: copyProbe, piAiProviders: ['demo'] }))
+if (!copyText.includes('在 llm-pi-ai 的 demo 下没有这个模型')
+  || !copyText.includes('该模型由其他适配器提供')) {
+  console.error('smoke: skipped:not-in-pi-ai-config must split into configured-provider vs other-adapter copy (FEAT-004 §10.1) — got ' + copyText)
+  process.exit(1)
+}
+if (copyText.includes('仅展示，未写入')) {
+  console.error('smoke: the misleading "仅展示，未写入" copy must not be used for skipped:not-in-pi-ai-config (FEAT-004 §10.1)')
+  process.exit(1)
+}
+// 设计 §10.3：删除模型默认（mutate unset）的撤销 = update 写回旧等级（不是对称 unset）
+API.settings.describe = async () => ({
+  result: {
+    ok: true,
+    value: {
+      namespaces: [
+        { ns: 'llm-reasoning', value: { enabled: true, level: 'max', models: { 'demo/m1': 'low' }, purposes: {}, syncDefaultAgent: false, statsPublic: false } },
+        { ns: 'llm-pi-ai', value: { providers: { demo: { reasoning: 'high', models: [{ id: 'm1', reasoningEfforts: { low: 'low', high: 'high' } }] } } } },
+        { ns: 'llm-deepseek', value: { reasoningEffort: 'max' } },
+      ],
+    },
+  },
+})
+const deletePage = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
+const deletePageComponents = []
+collectComponents(deletePage, deletePageComponents)
+const deleteModelDefaults = deletePageComponents.find(([name]) => name === 'ModelDefaults')
+if (deleteModelDefaults === undefined) {
+  console.error('smoke: ModelDefaults must be reachable for delete-undo assertion (FEAT-004 §10.3)')
+  process.exit(1)
+}
+const writesBeforeDelete = writeCalls.length
+deleteModelDefaults[2].onChange({ removeModelKey: 'demo/m1' })
+await effectsRan()
+const afterDeletePage = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
+const afterDeleteComponents = []
+collectComponents(afterDeletePage, afterDeleteComponents)
+const deleteToast = afterDeleteComponents.find(([name]) => name === 'Toast')
+if (deleteToast === undefined || deleteToast[2].actionLabel !== '撤销') {
+  console.error('smoke: delete-model-default must offer the same 「撤销」action (FEAT-004 §10.3)')
+  process.exit(1)
+}
+const writesBeforeDeleteUndo = writeCalls.length
+deleteToast[2].onAction()
+await effectsRan()
+const restoreDelete = writeCalls.slice(writesBeforeDeleteUndo)
+  .find((call) => call.method === 'update' && call.patch !== undefined && call.patch.models !== undefined && call.patch.models['demo/m1'] === 'low')
+if (restoreDelete === undefined) {
+  console.error('smoke: undo of a deleted model default must write the old level back via settings.update — got ' + JSON.stringify(writeCalls.slice(writesBeforeDeleteUndo)))
+  process.exit(1)
+}
+const deleteCallBefore = writeCalls.slice(writesBeforeDelete, writesBeforeDeleteUndo)
+  .find((call) => call.method === 'mutate')
+if (deleteCallBefore === undefined || JSON.stringify(deleteCallBefore.ops) !== JSON.stringify([{ op: 'unset', path: ['models', 'demo/m1'] }])) {
+  console.error('smoke: delete model default must keep the mutate unset call shape before undo — got ' + JSON.stringify(writeCalls.slice(writesBeforeDelete, writesBeforeDeleteUndo)))
+  process.exit(1)
+}
+
 // ── 3. MAINT-025 (b)：写路径经真实适配层驱动契约桩。旧冒烟从不触发写路径，
 // 契约桩不承重 = 防护形同虚设；此步让 update/mutate 的元数/形状校验真实执行
 // （调用形状 = 页面 change() 的实际形状，锚定 lib/client.js:766-772——页面不传
@@ -473,4 +724,4 @@ await pageElement.props.api.settings.update({ ns: 'llm-reasoning', patch: { leve
 await pageElement.props.api.settings.mutate({ ns: 'llm-reasoning', ops: [{ op: 'unset', path: ['models', 'demo/m1'] }] })
 
 for (const timer of timers) clearTimeout(timer)
-console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, 7 write entries + 3-arg update/mutate contract stubs exercised, FEAT-004 blocked attribution + FEAT-005 level comparison asserted')
+console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, 7 write entries + 3-arg update/mutate contract stubs exercised, FEAT-004 (search add / support matrix / stats toolbar / undo / persisted tri-state) + blocked attribution + FEAT-005 level comparison asserted')
