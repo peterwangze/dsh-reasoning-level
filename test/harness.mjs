@@ -21,6 +21,14 @@
  * register/get 移除；update/replace/mutate 写 user 层 + bump revision；
  * configure 记录调用。ctx.inject(['settings'], cb) 同步触发（服务就绪即调，
  * cordis 4.0.5 语义），cb 收到的 child 携带 settings + effect。
+ *
+ * 0.2.x 代序 webServer 晚到（RCA 2026-10-20）：ctx.inject 改为**按依赖名分派**
+ * ——['settings'] 交付 settings child，['webServer'] 交付 webServer child（同一
+ * 服务面 + effect/on）；deferWebServer=true 模拟 apply 期 webServer 尚不可见
+ * （ctx.get('webServer') 恒 undefined 且 ['webServer'] 注入回调登记不触发），
+ * 由 state.provideWebServer() 触发迟到挂载；state.restartWebServer() 模拟服务
+ * 重启（销毁旧 child effect + 新实例重投递）。默认行为不变：mount 后同步拿到
+ * 四条路由。withoutInject=true 移除 ctx.inject 表面（回退路径用例）。
  */
 import { register } from 'node:module'
 import { EventEmitter } from 'node:events'
@@ -76,6 +84,7 @@ export function makeCtx(options = {}) {
     nsConfig,            // llm-reasoning user 层（replace 写入时同步更新）
     piAiSection,         // llm-pi-ai user 层（replace 时同步更新，供 validatingStream 读取当前声明）
     routes: new Map(),   // path -> handler
+    routeRegistrations: [], // 每次 webServer.register 调用记录 path（双注册判别观察面）
     schemas: new Map(),  // ns -> registered schema（历史面记录，0.2.0 起插件不再调用）
     replaceCalls: [],    // { ns, value }
     mutateCalls: [],     // { ns, ops }
@@ -150,19 +159,30 @@ export function makeCtx(options = {}) {
   // 的旧宿主形态）；timeoutImpl 允许驱动 boot 重试链（缺省 no-op，既有测试语义
   // 不变——entry 缺席重试在缺省桩下不推进，负相测试显式注入同步实现）。
   const settings = options.settingsImpl ?? builtInSettings
-  const webServer = {
+  /** 内存 webServer 桩：register 捕获 path -> handler；disposer 只卸载自己注册的处理器。 */
+  const makeWebServer = () => ({
     register({ kind, path, handler }) {
       state.routes.set(path, handler)
-      return () => {}
+      state.routeRegistrations.push(path)
+      return () => {
+        if (state.routes.get(path) === handler) state.routes.delete(path)
+      }
     },
-  }
+  })
+  let activeWebServer = options.webServerImpl ?? makeWebServer()
+  // webServer 可见性：deferWebServer=true = apply 期服务尚未挂载（0.2.x 代序常态）。
+  let webServerVisible = options.deferWebServer !== true
+  /** 登记的 ['webServer'] 注入回调（deferWebServer 期登记、provideWebServer 投递）。 */
+  const webServerInjectCallbacks = []
+  /** 每次注入投递产生的 child（服务重启模拟时按序销毁其 effect）。 */
+  const webServerChildren = []
   const ctx = {
     settings,
     llm,
     fiber: {}, // cordis fiber（configure(presentation, owner) 的 owner 参数面）
     logger: { warn() {}, info() {}, error() {} },
     get(key) {
-      return key === 'webServer' ? webServer : undefined
+      return key === 'webServer' ? (webServerVisible ? activeWebServer : undefined) : undefined
     },
     effect(fn) {
       return fn()
@@ -172,13 +192,23 @@ export function makeCtx(options = {}) {
       state.handlers.set(eventName, callback)
     },
     inject(dependencies, callback) {
-      /** 同步触发注入回调（cordis 4.0.5：服务就绪即调）；deferInject=true 模拟
-       * 极简 profile 无 settings 服务（回调永不触发——数据面自禁用负相）。
+      /** 按依赖名分派注入回调（cordis 4.0.5：服务就绪即调）；child 携带对应
+       * 服务 + effect + on。deferInject=true 模拟极简 profile 无 settings 服务
+       * （回调永不触发——数据面自禁用负相）；deferWebServer=true 模拟 webServer
+       * 晚到（['webServer'] 回调登记不触发，provideWebServer() 投递——见下）。
        * R0-P2-1：child.on 转接主 ctx.on（产品代码事件挂注入子 fiber；记录面
        * 仍进 state.handlers 供测试驱动）。 */
       state.injectCalls.push([...dependencies])
+      if (dependencies.includes('webServer')) {
+        webServerInjectCallbacks.push(callback)
+        if (!webServerVisible) return undefined
+        const child = makeInjectChild({ webServer: activeWebServer })
+        webServerChildren.push(child)
+        callback(child)
+        return child
+      }
       if (options.deferInject === true) return undefined
-      const child = { settings, effect: (fn, label) => ctx.effect(fn, label), on: (n, cb) => ctx.on(n, cb) }
+      const child = makeInjectChild({ settings })
       callback(child)
       return child
     },
@@ -186,6 +216,51 @@ export function makeCtx(options = {}) {
       if (options.timeoutImpl !== undefined) options.timeoutImpl(fn, ms)
     },
   }
+  /**
+   * 注入 child：服务面 + effect/on。effect 立即执行并按 disposer 登记——服务重启
+   * 模拟（restartWebServer）据此销毁旧 child 的全部 effect（路由随 disposer 卸载）。
+   */
+  function makeInjectChild(services) {
+    const disposers = []
+    return {
+      ...services,
+      effect(fn, label) {
+        const dispose = ctx.effect(fn, label)
+        if (typeof dispose === 'function') disposers.push(dispose)
+        return dispose
+      },
+      on(eventName, callback) {
+        ctx.on(eventName, callback)
+      },
+      disposeEffects() {
+        for (const dispose of disposers.splice(0)) dispose()
+      },
+    }
+  }
+  /**
+   * 触发迟到挂载（0.2.x 代序 webServer 晚于插件 apply 到货）。每次调用都重投递
+   * 注入回调：覆盖首次迟到挂载，也用作"同一实例重复投递"的幂等守卫负相（真实
+   * cordis 的服务重启 = 新实例 + 子 fiber unload/reload，见 restartWebServer）。
+   */
+  state.provideWebServer = (impl) => {
+    if (impl !== undefined) activeWebServer = impl
+    webServerVisible = true
+    for (const callback of webServerInjectCallbacks) {
+      const child = makeInjectChild({ webServer: activeWebServer })
+      webServerChildren.push(child)
+      callback(child)
+    }
+  }
+  /**
+   * 服务重启模拟（新实例）：销毁旧 child 的全部 effect（cordis fiber epoch 变化
+   * → unload），再以新实例重投递注入回调（reload）——旧路由必须随 disposer 消失、
+   * 新实例重挂，不得残留旧处理器。
+   */
+  state.restartWebServer = (impl) => {
+    for (const child of webServerChildren.splice(0)) child.disposeEffects()
+    state.provideWebServer(impl ?? makeWebServer())
+  }
+  if (options.withoutInject === true) delete ctx.inject
   return { ctx, state }
 }
 

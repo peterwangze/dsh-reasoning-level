@@ -99,9 +99,12 @@ test('(guard-5) 正常路径 contractHealth.ok=true；静态 inject = [llm, time
   assert.deepEqual(mod.inject, ['llm', 'timer'])
   assert.deepEqual([...hostCompat.HOST_SERVICES.serverInject], ['llm', 'timer'])
   assert.deepEqual([...hostCompat.HOST_SERVICES.optionalInject], ['settings'])
+  assert.deepEqual([...hostCompat.HOST_SERVICES.webServerInject], ['webServer'])
   const { ctx, state } = makeCtx()
   await mount(ctx)
-  assert.deepEqual(state.injectCalls, [['settings']])
+  // 注入面分派（RCA 2026-10-20）：settings 可选注入 + webServer 注入等待（0.2.x 服务晚到）
+  assert.deepEqual(state.injectCalls.filter((deps) => deps.includes('settings')), [['settings']])
+  assert.deepEqual(state.injectCalls.filter((deps) => deps.includes('webServer')), [['webServer']])
   const { payload } = await callRoute(state, STATS)
   assert.equal(payload.contractHealth.ok, true)
   assert.deepEqual(payload.contractHealth.missing, [])

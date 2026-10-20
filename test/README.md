@@ -25,6 +25,10 @@ llm 的 stream/resolveModelInfo、webServer.register 捕获、logger/effect/on/t
 `parseProbeInput -> probeModelLevels -> probeLevelOnce -> llm.stream ->
 applyProbeResults` 全部执行路径；`ctx.on` 记录事件处理器，测试可驱动真实钩子
 路径（MAINT-013 自愈黑名单仅内存态：真实调用拒绝 → 注入跳过 → 探测重置）。
+RCA 2026-10-20 起 `ctx.inject` **按依赖名分派**（['settings'] / ['webServer']）：
+`deferWebServer: true` 模拟 apply 期 webServer 尚未挂载（0.2.x 代序常态），
+`state.provideWebServer()` / `state.restartWebServer()` 分别触发迟到挂载与服务
+重启（新实例）；`withoutInject: true` 移除注入表面以驱动 eager 回退路径。
 
 ## 覆盖（DEV-002 a-e + F1/F2 回归 + DEV-003 新增 + MAINT-013）
 
@@ -38,6 +42,10 @@ applyProbeResults` 全部执行路径；`ctx.on` 记录事件处理器，测试�
 - （e）F2 回归：replace 失败无 pin 分叉、成功时 replace 先于 probeEfforts 持久化；
 - `gate-access.test.mjs` 403 门控：非回环 + statsPublic=false 拒绝（stats/probe/test/apply），
   statsPublic=true 放行，回环 Host 变体矩阵；
+- `http-endpoints-late-service.test.mjs` **RCA 2026-10-20 守卫**（webServer 晚到）：
+  apply 期无服务 → 四端点不注册且不抛错；provideWebServer() 后四端点全挂 + stats 200
+  合法 JSON；重复 provide / 同实例二次注入不双注册；无 ctx.inject 表面回退 eager
+  ctx.get；服务重启（新实例）→ 旧路由随 scope effect 销毁 + 新实例重挂；
 - `probe-errors.test.mjs` err 分支：no candidate levels / not-in-pi-ai-config /
   already-verified / 空 results / 空 body（400）/ /test 端点成功路径；
 - `probe-timeout.test.mjs` 30s abort：中止定时器 30000ms 挂载 + 触发后 blocked 分类

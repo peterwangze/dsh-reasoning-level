@@ -191,7 +191,8 @@ test('(face-2) settings.configure({auto:false}, ctx.fiber) 恰一次（关闭宿
   assert.equal(state.configureCalls.length, 1, 'configure 必须恰好调用一次')
   assert.deepEqual(state.configureCalls[0].presentation, { auto: false })
   assert.ok(state.configureCalls[0].owner !== undefined, 'owner 参数（ctx.fiber）必须显式传入')
-  assert.deepEqual(state.injectCalls, [['settings']], 'settings 运行时可选注入面必须声明')
+  assert.deepEqual(state.injectCalls.filter((deps) => deps.includes('settings')), [['settings']], 'settings 运行时可选注入面必须声明')
+  assert.deepEqual(state.injectCalls.filter((deps) => deps.includes('webServer')), [['webServer']], 'webServer 必须经 ctx.inject 等待就绪（0.2.x 代序服务晚到，RCA 2026-10-20）')
 })
 
 test('(face-3) 读路径统一：describe().value 投影（defaults ∪ user）——自有读取不再依赖 settings.get', async () => {

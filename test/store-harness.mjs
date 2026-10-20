@@ -15,6 +15,11 @@
  * 数组含 {ns, value, user, revision}（value = RL_DEFAULTS ∪ store 节，等价旧
  * get 的 resolved 语义；user = store 节本体，rawSection 消费）；mutate/replace
  * 就地改 store；configure 记录调用；ctx.inject 同步触发（harness.mjs 同款）。
+ *
+ * 0.2.x 代序 webServer 晚到（RCA 2026-10-20）：ctx.inject 与 harness.mjs 同款
+ * 按依赖名分派（['settings'] / ['webServer']）并支持 deferWebServer +
+ * provideWebServer/restartWebServer——两个夹具保持同一注入语义，避免判别测试
+ * 与主夹具行为分叉。
  */
 import { RL_DEFAULTS } from './harness.mjs'
 
@@ -46,6 +51,7 @@ export function makeStoreCtx(store, options = {}) {
   const state = {
     piAiSection: store.piAi, // 供 validatingStream/getModelReasoningEfforts 读取（replace 后同步）
     routes: new Map(),
+    routeRegistrations: [], // 每次 webServer.register 调用记录 path（双注册判别观察面）
     schemas: new Map(),
     replaceCalls: [],
     mutateCalls: [],
@@ -107,19 +113,26 @@ export function makeStoreCtx(store, options = {}) {
     resolveModelInfo: options.resolveModelInfo ?? (async () => undefined),
     stream: options.stream ?? (async function* () {}),
   }
-  const webServer = {
+  const makeWebServer = () => ({
     register({ kind, path, handler }) {
       state.routes.set(path, handler)
-      return () => {}
+      state.routeRegistrations.push(path)
+      return () => {
+        if (state.routes.get(path) === handler) state.routes.delete(path)
+      }
     },
-  }
+  })
+  let activeWebServer = options.webServerImpl ?? makeWebServer()
+  let webServerVisible = options.deferWebServer !== true
+  const webServerInjectCallbacks = []
+  const webServerChildren = []
   const ctx = {
     settings,
     llm,
     fiber: {},
     logger: { warn() {}, info() {}, error() {} },
     get(key) {
-      return key === 'webServer' ? webServer : undefined
+      return key === 'webServer' ? (webServerVisible ? activeWebServer : undefined) : undefined
     },
     effect(fn) {
       return fn()
@@ -128,13 +141,55 @@ export function makeStoreCtx(store, options = {}) {
       state.handlers.set(eventName, callback)
     },
     inject(dependencies, callback) {
+      /** harness.mjs 同款按依赖名分派；deferInject 仅作用于 settings（极简 profile
+       * 无 settings 服务——数据面自禁用负相），deferWebServer 仅作用于 webServer。 */
       state.injectCalls.push([...dependencies])
-      const child = { settings, effect: (fn, label) => ctx.effect(fn, label), on: (n, cb) => ctx.on(n, cb) }
+      if (dependencies.includes('webServer')) {
+        webServerInjectCallbacks.push(callback)
+        if (!webServerVisible) return undefined
+        const child = makeInjectChild({ webServer: activeWebServer })
+        webServerChildren.push(child)
+        callback(child)
+        return child
+      }
+      if (options.deferInject === true) return undefined
+      const child = makeInjectChild({ settings })
       callback(child)
       return child
     },
     timeout() {},
   }
+  function makeInjectChild(services) {
+    const disposers = []
+    return {
+      ...services,
+      effect(fn, label) {
+        const dispose = ctx.effect(fn, label)
+        if (typeof dispose === 'function') disposers.push(dispose)
+        return dispose
+      },
+      on(eventName, callback) {
+        ctx.on(eventName, callback)
+      },
+      disposeEffects() {
+        for (const dispose of disposers.splice(0)) dispose()
+      },
+    }
+  }
+  state.provideWebServer = (impl) => {
+    if (impl !== undefined) activeWebServer = impl
+    webServerVisible = true
+    for (const callback of webServerInjectCallbacks) {
+      const child = makeInjectChild({ webServer: activeWebServer })
+      webServerChildren.push(child)
+      callback(child)
+    }
+  }
+  state.restartWebServer = (impl) => {
+    for (const child of webServerChildren.splice(0)) child.disposeEffects()
+    state.provideWebServer(impl ?? makeWebServer())
+  }
+  if (options.withoutInject === true) delete ctx.inject
   return { ctx, state }
 }
 
