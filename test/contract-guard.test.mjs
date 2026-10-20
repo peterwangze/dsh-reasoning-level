@@ -20,7 +20,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeCtx, mount, loadPlugin, callRoute } from './harness.mjs'
 import * as hostCompat from '../lib/host-compat.js'
@@ -53,6 +53,13 @@ function legacyHostSettings() {
 
 // ── A. 消费面方法缺失 → 自禁用 + contractHealth 上报 ────────────────────────
 test('(guard-1) settings.mutate 缺席 → 数据面自禁用（无事件注册/无迁移）+ health 上报', async () => {
+  // MAINT-039（测试隔离）：原断言硬编码「迁移标记不存在」，在真实 $DSH_HOME
+  // （如 C:\Users\peter\.dsh）下恒红——该文件是真实运行留下的合法产物，与被测的
+  // 自禁用路径无关。改为「本次 mount 前后快照对比」：自禁用路径不得新建标记；
+  // 标记原本存在时也不得被本次运行重写（mtime/size 不变）。两条都保留原语义
+  // 「自禁用路径零落盘」，且结果不依赖测试机 home 的初始状态。
+  const migrationMarker = join(process.env.DSH_HOME, 'storages', 'reasoning-level-migrated.json')
+  const markerBefore = existsSync(migrationMarker) ? statSync(migrationMarker) : undefined
   const { ctx, state } = makeCtx({ settingsImpl: settingsMissing('mutate') })
   await mount(ctx)
   const { payload } = await callRoute(state, STATS)
@@ -62,7 +69,13 @@ test('(guard-1) settings.mutate 缺席 → 数据面自禁用（无事件注册/
   assert.equal(state.handlers.has('settings/document-updated'), false)
   assert.equal(state.handlers.has('settings/updated'), false)
   assert.equal(state.configureCalls.length, 0)
-  assert.equal(existsSync(join(process.env.DSH_HOME, 'storages', 'reasoning-level-migrated.json')), false)
+  if (markerBefore === undefined) {
+    assert.equal(existsSync(migrationMarker), false, '自禁用路径不得新建迁移标记（本次 mount 零落盘，MAINT-039）')
+  } else {
+    const markerAfter = statSync(migrationMarker)
+    assert.equal(markerAfter.mtimeMs, markerBefore.mtimeMs, '自禁用路径不得重写已存在的迁移标记（本次 mount 零落盘，MAINT-039）')
+    assert.equal(markerAfter.size, markerBefore.size, '自禁用路径不得改写迁移标记内容（本次 mount 零落盘，MAINT-039）')
+  }
 })
 
 test('(guard-2) llm.stream 非函数 → 同一自禁用路径（llm 面纳入自检）', async () => {

@@ -80,6 +80,11 @@ const STATS_FIXTURE = {
     'demo/m1': {
       calls: 2, efforts: { high: 2 }, reasoningTokens: 12, outputTokens: 34,
       reasoningChars: 0, durationMs: 120, errors: 0, errRate: 0, rejected: [],
+      // FEAT-005：per-level 聚合（同一模型两个等级桶）→ 等级对比区必须渲染对照表
+      byLevel: {
+        high: { calls: 1, reasoningTokens: 6, outputTokens: 12, reasoningChars: 0, durationMs: 60, errors: 0 },
+        max: { calls: 1, reasoningTokens: 6, outputTokens: 22, reasoningChars: 0, durationMs: 60, errors: 0 },
+      },
     },
   },
   recent: [
@@ -94,6 +99,12 @@ const STATS_FIXTURE = {
     t: 1757100000000,
     models: {
       'demo/m1': { working: ['high', 'max'], rejected: ['xhigh'], blocked: [], persisted: 'no-change-already-correct' },
+      // FEAT-004 ⑦（设计 §6.2/§10.1）：blocked 归因 + 官方适配器结局两列渲染源
+      'demo/m2': {
+        working: [], rejected: [], blocked: ['max'],
+        blockedReasons: { max: { code: 'RATE_LIMITED', message: '429 too many requests' } },
+        persisted: 'skipped:official-adapter',
+      },
     },
   },
 }
@@ -341,6 +352,61 @@ if (statsTextAll.includes('尚未探测过')) {
   process.exit(1)
 }
 
+// ── 2c-2 FEAT-004 ⑦：探测结果「其他错误」列归因 + 官方适配器结局渲染 ─────────
+// （fixture demo/m2：blocked=['max'] + blockedReasons.max=429 → 「限流或额度不足」；
+//  persisted=skipped:official-adapter → PERSISTED_KEYS 新语义文案，不得显示旧
+//  「不在 llm-pi-ai 配置」）
+if (!statsTextAll.includes('限流或额度不足') || !statsTextAll.includes('由 DeepSeek 官方适配器管理')) {
+  console.error('smoke: probe results must render blocked attribution and official-adapter outcome (FEAT-004 ⑦) — got ' + statsTextAll)
+  process.exit(1)
+}
+if (statsTextAll.includes('不在 llm-pi-ai 配置——仅展示')) {
+  console.error('smoke: official-adapter result must not fall back to the misleading "not in llm-pi-ai config" text (FEAT-004 ⑦)')
+  process.exit(1)
+}
+
+// ── 2c-3 FEAT-005：等级对比区（byLevel loaded 路径）────────────────────────────
+// StatsPanel 内的 LevelCompare 是惰性组件元素，collectText 不会下钻它的渲染树；
+// 从已渲染的 StatsPanel 树里收集组件并单独渲染，断言对照表真实出现在 DOM 树里。
+const statsComponents = []
+collectComponents(statsPanelTree, statsComponents)
+const levelCompareEntry = statsComponents.find(([name]) => name === 'LevelCompare')
+if (levelCompareEntry === undefined) {
+  console.error('smoke: LevelCompare component is missing from the loaded StatsPanel tree (FEAT-005)')
+  process.exit(1)
+}
+const levelCompareTree = await renderTwice('LevelCompare', levelCompareEntry[1], levelCompareEntry[2])
+// LevelCompare 返回 Disclosure 元素（组件）——再渲染一层，让 <summary> 标题与表体
+// 都进入可遍历的节点树（Disclosure 无 hook；children 以第三参传入，需显式回填）。
+const renderedCompare = levelCompareTree.$$ === 'component'
+  ? levelCompareTree.tag({ ...levelCompareTree.props, children: levelCompareTree.children })
+  : levelCompareTree
+const compareText = []
+collectText(renderedCompare, compareText)
+const compareTextAll = compareText.join('|')
+if (!compareTextAll.includes('等级对比（同一模型不同等级的实际代价）')
+  || !compareTextAll.includes('demo/m1') || !compareTextAll.includes('高') || !compareTextAll.includes('最大')
+  || !compareTextAll.includes('平均耗时')) {
+  console.error('smoke: level comparison must render a per-level comparison table for a 2-bucket model (FEAT-005) — got ' + compareTextAll)
+  process.exit(1)
+}
+if (compareTextAll.includes('等级对比数据自 v0.9.0 起累积')) {
+  console.error('smoke: level comparison must NOT render the upgrade empty state when byLevel has ≥2 buckets (FEAT-005)')
+  process.exit(1)
+}
+// 旧服务端（无 byLevel）→ 空态必须如实说明「数据自 v0.9.0 起累积」（设计 §10.4）
+const legacyStats = { ...STATS_FIXTURE, models: { 'demo/m1': { ...STATS_FIXTURE.models['demo/m1'], byLevel: undefined } } }
+const legacyCompareTree = await renderTwice('LevelCompare', levelCompareEntry[1], { ...levelCompareEntry[2], stats: legacyStats })
+const renderedLegacyCompare = legacyCompareTree.$$ === 'component'
+  ? legacyCompareTree.tag({ ...legacyCompareTree.props, children: legacyCompareTree.children })
+  : legacyCompareTree
+const legacyCompareText = []
+collectText(renderedLegacyCompare, legacyCompareText)
+if (!legacyCompareText.join('|').includes('等级对比数据自 v0.9.0 起累积')) {
+  console.error('smoke: level comparison must show the v0.9.0 accumulation empty state when byLevel is absent (FEAT-005 / §10.4)')
+  process.exit(1)
+}
+
 // ── 2d. 028-F3：(默认) 记账复合标注 + statsHint 措辞如实化 ──────────────────
 // （fixture recent 含 effort:null + defaulted:'high' → 最近调用表必须渲染复合
 //  标签「默认→高」；说明区 statsHint 不得再出现与实现不符的旧措辞「默认物化后的
@@ -407,4 +473,4 @@ await pageElement.props.api.settings.update({ ns: 'llm-reasoning', patch: { leve
 await pageElement.props.api.settings.mutate({ ns: 'llm-reasoning', ops: [{ op: 'unset', path: ['models', 'demo/m1'] }] })
 
 for (const timer of timers) clearTimeout(timer)
-console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, 7 write entries + 3-arg update/mutate contract stubs exercised')
+console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, 7 write entries + 3-arg update/mutate contract stubs exercised, FEAT-004 blocked attribution + FEAT-005 level comparison asserted')

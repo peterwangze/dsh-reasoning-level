@@ -57,6 +57,14 @@ RCA 2026-10-20 起 `ctx.inject` **按依赖名分派**（['settings'] / ['webSer
   ≥ 服务端最坏波数×30s+5s（已转绿，回归即红）；
 - `client-probe-summary.test.mjs` **N2 TDD 守卫**：probeAll 起始重置 probeSummaryOk、
   失败轮后重跑成功恢复绿色（已转绿，回归即红）；
+- `client-by-level-aggregation.test.mjs` **FEAT-005 守卫**：per-level 聚合判别——同模型
+  两个等级两桶（各自归桶）；不变量 Σ byLevel.calls === Σ efforts === calls 且合计字段 =
+  各桶之和；旧快照（无 byLevel）hydrate → `{}` 不崩、旧字段零漂移；`(默认)` 桶存在；
+  wire 受控键（词表外等级键丢弃）；persistStats 落盘 byLevel（5s debounce 显式等待）；
+- `probe-blocked-reasons.test.mjs` **FEAT-004 ⑦ 守卫**：blocked 档位 code/message/kind
+  进入 `blockedReasons` 并随 lastProbe 落盘；rejected 不进入；旧 lastProbe（无字段）
+  客户端按「未知原因」降级不崩；`skipped:official-adapter` 判据（provider 白名单 +
+  llm-deepseek 设置节已注册 + 非 pi-ai 配置）与 /probe/apply 收口不降级；
 - `resolve-fallback.test.mjs` T2：`$DSH_HOME` 优先（临时伪造树子进程集成）+ 回退
   ~/.dsh（单元 + 反向验证）。
 
