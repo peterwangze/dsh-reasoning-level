@@ -203,3 +203,35 @@ test('(bylevel-5) wire 受控键：词表外等级桶保留在内部/盘上但�
     assert.deepEqual(payload.models['qwen/m1'].efforts, { high: 1, ultra: 1 })
   })
 })
+
+test('(R0-P2-4) 建议结构化字段：错误率高 → suggestionKind/Params 与旧 suggestion 并存', async () => {
+  await withTempHome(async () => {
+    const { ctx, state } = makeCtx({ nsConfig: { enabled: false, statsPublic: true } })
+    await mount(ctx)
+    for (let i = 0; i < 4; i++) await drainCall(state, { provider: 'p', model: 'm', reasoningEffort: 'high' }, usageChunks(1, 1))
+    // 第 5 次失败 → errRate = 20%（错误率阈值 ≥20 命中提示档）
+    await drainCall(state, { provider: 'p', model: 'm', reasoningEffort: 'high' }, [
+      { type: 'finish', reason: { kind: 'error', failure: { code: 'UPSTREAM_502', message: 'bad gateway' } } },
+    ])
+    const agg = (await callRoute(state, STATS, {})).payload.models['p/m']
+    assert.equal(agg.suggestionKind, 'high-error-rate', '客户端按 kind 渲染（不展示服务端中文字符串）')
+    assert.deepEqual(agg.suggestionParams, { errorRate: 20 })
+    assert.equal(agg.suggestion, '错误率 20% 偏高，建议降低等级', '旧字段 suggestion 必须保留（旧客户端兼容，红线：只加不删）')
+  })
+})
+
+test('(R0-P2-4) 建议结构化字段：实测拒绝 → suggestionKind=rejected-levels + 参数（含 highest）', async () => {
+  await withTempHome(async () => {
+    const { ctx, state } = makeCtx({ nsConfig: { enabled: false, statsPublic: true } })
+    await mount(ctx)
+    for (let i = 0; i < 5; i++) await drainCall(state, { provider: 'p', model: 'm', reasoningEffort: 'high' }, usageChunks(1, 1))
+    // 1/6 失败 = 17% < 20%：不触发 high-error-rate，走 rejected-levels 分支
+    await drainCall(state, { provider: 'p', model: 'm', reasoningEffort: 'low' }, [
+      { type: 'finish', reason: { kind: 'error', failure: { code: 'UNSUPPORTED_REASONING_EFFORT', message: 'reasoning effort "low" is not supported' } } },
+    ])
+    const agg = (await callRoute(state, STATS, {})).payload.models['p/m']
+    assert.equal(agg.suggestionKind, 'rejected-levels')
+    assert.deepEqual(agg.suggestionParams, { rejected: ['low'], highest: 'high' })
+    assert.equal(agg.suggestion, '实测拒绝 low，建议用最高档 high', '旧字段 suggestion 必须保留（旧客户端兼容）')
+  })
+})

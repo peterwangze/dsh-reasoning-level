@@ -71,6 +71,7 @@ const react = {
 
 const timers = []
 const effectsRan = () => new Promise((resolve) => setTimeout(resolve, 5))
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // ── host-side stubs the client touches during render ─────────────────────
 const STATS_FIXTURE = {
@@ -208,11 +209,35 @@ const HOST_FACES = {
 
 // ── load the client module through its own ModuleLoader contract ─────────
 let loaded = null
+// R0-P3-7：CSV 导出的浏览器面桩（exportCsv 在沙箱里也能真实执行并捕获产物）。
+const csvSink = { value: '' }
+class CsvBlob {
+  constructor(parts) { this.parts = Array.isArray(parts) ? parts : [] }
+}
 const sandbox = {
   window: {
     __ModuleLoader__: { load(def) { loaded = def } },
     setInterval: () => 0,
     clearInterval: () => {},
+    // 客户端在浏览器路径上使用 window.setTimeout/clearTimeout（toast 自动消失、
+    // probe 抓取超时）。冒烟不依赖真实计时，直接返回 0（不建定时器、不自动消失）。
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+  },
+  // probeAll 直接调用 AbortController（VM 新上下文无 Node 全局）
+  AbortController,
+  Blob: CsvBlob,
+  URL: {
+    createObjectURL: (blob) => {
+      csvSink.value = Array.isArray(blob.parts) ? blob.parts.join('') : ''
+      return 'blob:smoke'
+    },
+    revokeObjectURL: () => {},
+  },
+  document: {
+    head: { appendChild: () => {} },
+    getElementById: () => null,
+    createElement: () => ({ setAttribute() {}, click() {} }),
   },
   fetch: async () => ({ ok: true, status: 200, json: async () => STATS_FIXTURE }),
 }
@@ -668,19 +693,47 @@ if (copyText.includes('仅展示，未写入')) {
   console.error('smoke: the misleading "仅展示，未写入" copy must not be used for skipped:not-in-pi-ai-config (FEAT-004 §10.1)')
   process.exit(1)
 }
-// 设计 §10.3：删除模型默认（mutate unset）的撤销 = update 写回旧等级（不是对称 unset）
+// ── 2i. R0-P2-3：撤销「删除模型默认」只写回该键 + 撤销时刻的最新 models ─────────
+// 设计 §10.3：删除模型默认（mutate unset）的撤销 = update 写回旧等级（不是对称 unset）。
+// R0-P2-3 判别：点击删除时的快照含 {demo/m1:low, demo/m2:high}；删除后（外部写者同时
+// 删掉 demo/m2）刷新得到 {}。撤销必须只写回 demo/m1，**不得**把旧快照里的 demo/m2
+// 一并回写（旧实现会静默复活它——本断言在旧实现下必红）。
+const liveModels = { 'demo/m1': 'low', 'demo/m2': 'high' }
 API.settings.describe = async () => ({
   result: {
     ok: true,
     value: {
       namespaces: [
-        { ns: 'llm-reasoning', value: { enabled: true, level: 'max', models: { 'demo/m1': 'low' }, purposes: {}, syncDefaultAgent: false, statsPublic: false } },
-        { ns: 'llm-pi-ai', value: { providers: { demo: { reasoning: 'high', models: [{ id: 'm1', reasoningEfforts: { low: 'low', high: 'high' } }] } } } },
+        { ns: 'llm-reasoning', value: { enabled: true, level: 'max', models: { ...liveModels }, purposes: {}, syncDefaultAgent: false, statsPublic: false } },
+        { ns: 'llm-pi-ai', value: { providers: { demo: { reasoning: 'high', models: [{ id: 'm1', reasoningEfforts: { low: 'low', high: 'high' } }, { id: 'm2' }] } } } },
         { ns: 'llm-deepseek', value: { reasoningEffort: 'max' } },
       ],
     },
   },
 })
+// live store 包装：原始契约桩先记录 writeCalls；随后把写入反映到 liveModels，
+// 并模拟「外部写者在删除与刷新之间删掉了另一个模型」。
+const rawRemoteUpdate = HOST_FACES.remoteSettings.update
+const rawRemoteMutate = HOST_FACES.remoteSettings.mutate
+HOST_FACES.remoteSettings.update = async (...args) => {
+  const response = await rawRemoteUpdate(...args)
+  const patch = args[1]
+  if (patch !== null && typeof patch === 'object' && patch.models !== null && typeof patch.models === 'object') {
+    Object.assign(liveModels, patch.models)
+  }
+  return response
+}
+HOST_FACES.remoteSettings.mutate = async (...args) => {
+  const response = await rawRemoteMutate(...args)
+  if (args[0] === 'llm-reasoning') {
+    for (const op of Array.isArray(args[1]) ? args[1] : []) {
+      if (op !== null && typeof op === 'object' && op.op === 'unset' && Array.isArray(op.path) && op.path.length === 2 && op.path[0] === 'models') delete liveModels[op.path[1]]
+    }
+    // 外部写者（另一标签页）在删除之后、刷新之前删除了 demo/m2
+    delete liveModels['demo/m2']
+  }
+  return response
+}
 const deletePage = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
 const deletePageComponents = []
 collectComponents(deletePage, deletePageComponents)
@@ -692,6 +745,7 @@ if (deleteModelDefaults === undefined) {
 const writesBeforeDelete = writeCalls.length
 deleteModelDefaults[2].onChange({ removeModelKey: 'demo/m1' })
 await effectsRan()
+await sleep(20)
 const afterDeletePage = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
 const afterDeleteComponents = []
 collectComponents(afterDeletePage, afterDeleteComponents)
@@ -709,10 +763,327 @@ if (restoreDelete === undefined) {
   console.error('smoke: undo of a deleted model default must write the old level back via settings.update — got ' + JSON.stringify(writeCalls.slice(writesBeforeDeleteUndo)))
   process.exit(1)
 }
+if (Object.prototype.hasOwnProperty.call(restoreDelete.patch.models, 'demo/m2')) {
+  console.error('smoke: undo of a deleted model default must NOT write back the stale models snapshot (demo/m2 resurrected) — R0-P2-3; got ' + JSON.stringify(restoreDelete.patch.models))
+  process.exit(1)
+}
+const restoredKeys = Object.keys(restoreDelete.patch.models)
+if (restoredKeys.length !== 1 || restoredKeys[0] !== 'demo/m1') {
+  console.error('smoke: undo must restore exactly the deleted key {demo/m1: low} at undo time — R0-P2-3; got ' + JSON.stringify(restoreDelete.patch.models))
+  process.exit(1)
+}
 const deleteCallBefore = writeCalls.slice(writesBeforeDelete, writesBeforeDeleteUndo)
   .find((call) => call.method === 'mutate')
 if (deleteCallBefore === undefined || JSON.stringify(deleteCallBefore.ops) !== JSON.stringify([{ op: 'unset', path: ['models', 'demo/m1'] }])) {
   console.error('smoke: delete model default must keep the mutate unset call shape before undo — got ' + JSON.stringify(writeCalls.slice(writesBeforeDelete, writesBeforeDeleteUndo)))
+  process.exit(1)
+}
+
+// ══ R0 返工的针对性断言（2026-10-20）════════════════════════════════════════
+// R0-P2-6：agent-default 同步文案必须如实描述实际行为（实现没有还原路径，
+// 旧「已还原 / 保持宿主原设置」承诺不得回归）。
+for (const staleCopy of ['本插件写入的配置已还原', '关闭后保持宿主原设置', 'off keeps the host setting', 'Config written by this plugin has been reverted']) {
+  if (source.includes(staleCopy)) {
+    console.error('smoke: agent-default sync copy must describe actual behaviour (no revert path) — stale copy found: ' + staleCopy + ' (R0-P2-6)')
+    process.exit(1)
+  }
+}
+if (!source.includes('关闭后不再同步，已写入的值保持不变') || !source.includes('the default agent model is not reverted automatically')) {
+  console.error('smoke: agent-default sync copy must state the real write/keep semantics in both languages (R0-P2-6)')
+  process.exit(1)
+}
+const findComponent = (tree, name) => {
+  const list = []
+  collectComponents(tree, list)
+  return list.find(([componentName]) => componentName === name)
+}
+const renderPageStats = async () => {
+  const tree = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
+  const stats = findComponent(tree, 'StatsPanel')
+  if (stats === undefined) {
+    console.error('smoke: StatsPanel must be reachable from the page tree (R0 assertions)')
+    process.exit(1)
+  }
+  return { tree, stats }
+}
+const textOf = (node) => flattenText(node)
+
+// ── 2j. R0-P2-1：probeDone 汇总行按「三态」分别计数 ──────────────────────────
+// 服务端 /probe/apply 的 skipped 现在带可区分 reason：official-adapter /
+// not-in-pi-ai-config / no-working-levels；汇总行必须各给一句准确文案，不得复用
+// 旧「不在 llm-pi-ai 配置（结果仅展示，未写入）」归因。
+API.llm.models = async () => ({
+  result: {
+    ok: true,
+    value: { groups: [{ id: 'demo', models: [{ id: 'm1', name: 'M1' }, { id: 'm2', name: 'M2' }, { id: 'm3', name: 'M3' }, { id: 'm4', name: 'M4' }] }] },
+  },
+})
+// 计数必须彼此不同（2/1/1），否则「官方 ↔ 其他适配器」计数互换的变异无法被断言抓住。
+const probeApplied = {
+  writes: 0,
+  outcomes: [],
+  skipped: [
+    { key: 'demo/m1', reason: 'official-adapter' },
+    { key: 'demo/m2', reason: 'official-adapter' },
+    { key: 'demo/m3', reason: 'not-in-pi-ai-config' },
+    { key: 'demo/m4', reason: 'no-working-levels' },
+  ],
+}
+sandbox.fetch = async (url, init) => {
+  if (url === '/reasoning-level-stats/probe/apply') {
+    return { ok: true, status: 200, json: async () => probeApplied }
+  }
+  if (url === '/reasoning-level-stats/probe') {
+    let body = {}
+    try { body = JSON.parse(init !== undefined && typeof init.body === 'string' ? init.body : '{}') } catch (error) { body = {} }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ provider: 'demo', model: body.model, key: 'demo/' + body.model, working: ['high'], rejected: [], blocked: [], persisted: 'pending-apply' }),
+    }
+  }
+  return { ok: true, status: 200, json: async () => STATS_FIXTURE }
+}
+const probePage = await renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
+const probeHeader = findComponent(probePage, 'PageHeader')
+if (probeHeader === undefined) {
+  console.error('smoke: PageHeader must be reachable for probe summary assertion (R0-P2-1)')
+  process.exit(1)
+}
+const probeButton = collectButtons(probeHeader[1](probeHeader[2]))
+  .find((node) => flattenText(node) === '一键探测全部模型并固化配置')
+if (probeButton === undefined) {
+  console.error('smoke: probe-all button must be rendered in PageHeader (R0-P2-1)')
+  process.exit(1)
+}
+probeButton.props.onClick()
+await sleep(80)
+const { stats: probeDoneStats } = await renderPageStats()
+const probeSummaryText = textOf(probeDoneStats[1](probeDoneStats[2]))
+for (const expected of [
+  '2 个由官方适配器管理（无需写入）',
+  '1 个由其他适配器提供（无需写入）',
+  '1 个暂无可固化等级',
+]) {
+  if (!probeSummaryText.includes(expected)) {
+    console.error('smoke: probeDone summary must count outcomes separately — missing "' + expected + '" in: ' + probeSummaryText)
+    process.exit(1)
+  }
+}
+if (probeSummaryText.includes('不在 llm-pi-ai 配置（结果仅展示，未写入）')) {
+  console.error('smoke: probeDone summary must not reuse the old "不在 llm-pi-ai 配置" attribution (R0-P2-1)')
+  process.exit(1)
+}
+
+// ── 2k. R0-P2-5：思考列 rt=rc=0 → title「该网关未回报 reasoning tokens」────────
+stores.delete('StatsPanel')
+const zeroThinkStats = {
+  since: Date.now(), totalCalls: 1, recent: [], blacklist: {}, lastProbe: { t: 1, models: {} },
+  models: {
+    'demo/zero': {
+      calls: 1, efforts: { high: 1 }, byLevel: {},
+      reasoningTokens: 0, reasoningChars: 0, outputTokens: 5, durationMs: 10, errors: 0, errRate: 0, rejected: [],
+    },
+  },
+}
+const zeroThinkTree = renderStats({ ...statsEntry[2], stats: zeroThinkStats })
+const titledCells = []
+;(function collectTitledCells(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (node.$$ === 'td' && typeof node.props?.title === 'string') titledCells.push(node.props.title)
+  for (const child of node.children ?? []) collectTitledCells(child)
+  collectTitledCells(node.props?.children)
+})(zeroThinkTree)
+if (!titledCells.includes('该网关未回报 reasoning tokens')) {
+  console.error('smoke: thinking column must explain rt=rc=0 as "gateway did not report reasoning tokens" (R0-P2-5) — got ' + JSON.stringify(titledCells))
+  process.exit(1)
+}
+
+// ── 2l. R0-P3-6：LevelCompare 空态区分「非标准档位」与「数据自本版累积」────────
+const nonStandardStats = {
+  models: {
+    'custom/m1': {
+      calls: 3, efforts: { ultra: 3 }, byLevel: {},
+      reasoningTokens: 1, outputTokens: 2, reasoningChars: 0, durationMs: 30, errors: 0, errRate: 0, rejected: [],
+    },
+  },
+}
+const nonStdDisclosure = levelCompareEntry[1]({ ...levelCompareEntry[2], stats: nonStandardStats })
+const nonStdTree = nonStdDisclosure.$$ === 'component'
+  ? nonStdDisclosure.tag({ ...nonStdDisclosure.props, children: nonStdDisclosure.children })
+  : nonStdDisclosure
+const nonStdText = textOf(nonStdTree)
+if (!nonStdText.includes('非标准档位') || !nonStdText.includes('未计入等级对比')) {
+  console.error('smoke: LevelCompare empty state must explain non-standard efforts buckets (R0-P3-6) — got ' + nonStdText)
+  process.exit(1)
+}
+if (nonStdText.includes('等级对比数据自 v0.9.0 起累积')) {
+  console.error('smoke: non-standard-only efforts must NOT fall back to the "accumulates from v0.9.0" empty state (R0-P3-6)')
+  process.exit(1)
+}
+
+// ── 2m. R0-P3-7：CSV 追加 per-level 列（既有列不破）+ 最近调用渲染 100 行 ──────
+const csvStats = {
+  since: Date.now(), totalCalls: 2, recent: [], blacklist: {}, lastProbe: { t: 1, models: {} },
+  models: {
+    'demo/m1': {
+      calls: 2, efforts: { high: 1, max: 1 },
+      byLevel: {
+        high: { calls: 1, reasoningTokens: 6, outputTokens: 12, reasoningChars: 0, durationMs: 60, errors: 0 },
+        max: { calls: 1, reasoningTokens: 6, outputTokens: 22, reasoningChars: 0, durationMs: 60, errors: 0 },
+      },
+      reasoningTokens: 12, reasoningChars: 0, outputTokens: 34, durationMs: 120, errors: 0, errRate: 0, rejected: [],
+    },
+  },
+}
+stores.delete('StatsPanel')
+const csvTree = renderStats({ ...statsEntry[2], stats: csvStats })
+const exportButton = collectButtons(csvTree).find((node) => flattenText(node) === '导出 CSV')
+if (exportButton === undefined) {
+  console.error('smoke: CSV export button must be rendered (R0-P3-7)')
+  process.exit(1)
+}
+csvSink.value = ''
+exportButton.props.onClick()
+const parseCsvLine = (line) => line.slice(1, -1).split('","')
+const csvLines = csvSink.value.split('\n')
+const csvHeader = parseCsvLine(csvLines[0])
+const existingHeader = ['模型', '调用', '等级分布', '思考tokens', '思考字符', '输出tokens', '平均耗时ms', '错误率%']
+if (JSON.stringify(csvHeader.slice(0, existingHeader.length)) !== JSON.stringify(existingHeader)) {
+  console.error('smoke: CSV export must keep the existing columns unchanged (R0-P3-7) — got ' + JSON.stringify(csvHeader.slice(0, existingHeader.length)))
+  process.exit(1)
+}
+if (csvHeader.length !== existingHeader.length + 8) {
+  console.error('smoke: CSV export must append per-level columns for 7 levels + (默认) (R0-P3-7) — got ' + JSON.stringify(csvHeader))
+  process.exit(1)
+}
+for (const label of ['关闭 调用', '高 调用', '最大 调用', '(默认) 调用']) {
+  if (!csvHeader.includes(label)) {
+    console.error('smoke: CSV per-level column missing "' + label + '" (R0-P3-7) — got ' + JSON.stringify(csvHeader))
+    process.exit(1)
+  }
+}
+const csvRow = parseCsvLine(csvLines[1])
+const csvIndex = (label) => csvHeader.indexOf(label)
+if (csvRow[0] !== 'demo/m1' || csvRow[csvIndex('高 调用')] !== '1' || csvRow[csvIndex('最大 调用')] !== '1' || csvRow[csvIndex('关闭 调用')] !== '0') {
+  console.error('smoke: CSV per-level calls must match byLevel buckets (R0-P3-7) — got ' + JSON.stringify(csvRow))
+  process.exit(1)
+}
+// 最近调用：wire 窗口 100（服务端 recent.slice(0,100)）→ 表格渲染行数必须与工具栏
+// 「最近 100 条」一致（此前只渲染 20 行）。
+const manyRecent = Array.from({ length: 100 }, (_, index) => ({
+  t: 1757100000000 + index, provider: 'demo', model: 'm1', effort: 'high',
+  rt: 1, rc: null, ot: 1, it: 1, duration: 1, finish: 'stop',
+}))
+stores.delete('StatsPanel')
+const recentTree = renderStats({ ...statsEntry[2], stats: { ...csvStats, recent: manyRecent } })
+let recentRowCount = 0
+;(function countRecentRows(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (node.$$ === 'tr' && Array.isArray(node.children) && node.children.length === 7
+    && node.children.every((cell) => cell !== null && typeof cell === 'object' && cell.$$ === 'td')) recentRowCount += 1
+  for (const child of node.children ?? []) countRecentRows(child)
+  countRecentRows(node.props?.children)
+})(recentTree)
+if (recentRowCount !== 100) {
+  console.error('smoke: recent-calls table must render the full 100-row wire window to match 「最近 100 条」 (R0-P3-7) — got ' + recentRowCount)
+  process.exit(1)
+}
+if (!toolbarMetas.some((meta) => meta.includes('最近 100 条'))) {
+  console.error('smoke: stats toolbar meta must stay aligned with the rendered recent window (100) (R0-P3-7)')
+  process.exit(1)
+}
+
+// ── 2n. R0-P2-4：en 语境 —— (默认) 显示映射 + 结构化 suggestion + off 计费说明 ─
+const enRegistered = []
+client.apply({
+  get: (name) => (name === 'remote.settings' ? HOST_FACES.remoteSettings
+    : name === 'remote.session' ? HOST_FACES.remoteSession
+    : name === 'locale' ? { getSnapshot: () => ({ active: 'en' }) } : undefined),
+  slots: {
+    inject: (_slot, provider) => provider(),
+    register: (meta, render) => { enRegistered.push({ meta, render }); return () => {} },
+  },
+})
+if (enRegistered.length !== 1) {
+  console.error('smoke: en apply() must register exactly one settings.section')
+  process.exit(1)
+}
+API.settings.describe = async () => ({
+  result: {
+    ok: true,
+    value: {
+      namespaces: [
+        { ns: 'llm-reasoning', value: { enabled: true, level: 'off', models: {}, purposes: {}, syncDefaultAgent: false, statsPublic: false } },
+        { ns: 'llm-pi-ai', value: { providers: {} } },
+        { ns: 'llm-deepseek', value: { reasoningEffort: 'max' } },
+      ],
+    },
+  },
+})
+const enStats = {
+  since: Date.now(), totalCalls: 3, recent: [], blacklist: {}, lastProbe: { t: 1, models: {} },
+  models: {
+    'demo/m1': {
+      calls: 2, efforts: { '(默认)': 1, high: 1 },
+      byLevel: {
+        '(默认)': { calls: 1, reasoningTokens: 2, outputTokens: 3, reasoningChars: 0, durationMs: 10, errors: 0 },
+        high: { calls: 1, reasoningTokens: 2, outputTokens: 4, reasoningChars: 0, durationMs: 10, errors: 0 },
+      },
+      reasoningTokens: 4, reasoningChars: 0, outputTokens: 7, durationMs: 20, errors: 0, errRate: 0, rejected: [],
+      suggestionKind: 'high-error-rate', suggestionParams: { errorRate: 33 }, suggestion: '错误率 33% 偏高，建议降低等级',
+    },
+    'demo/m2': {
+      calls: 1, efforts: { xhigh: 1 }, byLevel: {},
+      reasoningTokens: 1, outputTokens: 2, reasoningChars: 0, durationMs: 5, errors: 1, errRate: 17, rejected: ['max'],
+      suggestionKind: 'rejected-levels', suggestionParams: { rejected: ['max'], highest: 'high' }, suggestion: '实测拒绝 max，建议用最高档 high',
+    },
+  },
+}
+sandbox.fetch = async () => ({ ok: true, status: 200, json: async () => enStats })
+stores.clear()
+const enElement = enRegistered[0].render({})
+const enPageTag = enElement.tag
+const enPageProps = enElement.props
+const enPage = await renderTwice('ReasoningPage', enPageTag, enPageProps)
+const enStatsEntry = findComponent(enPage, 'StatsPanel')
+if (enStatsEntry === undefined) {
+  console.error('smoke: en StatsPanel must be reachable (R0-P2-4)')
+  process.exit(1)
+}
+resetHooks('StatsPanel')
+const enStatsTree = enStatsEntry[1](enStatsEntry[2])
+const enText = textOf(enStatsTree)
+// effort 分布是 LevelChip 组件（label 在 props 里，不是文本节点）——单独收集。
+const enChipLabels = []
+;(function collectChips(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (node.$$ === 'component' && node.tag?.name === 'LevelChip' && typeof node.props?.label === 'string') enChipLabels.push(node.props.label)
+  for (const child of node.children ?? []) collectChips(child)
+  collectChips(node.props?.children)
+})(enStatsTree)
+if (!enChipLabels.includes('(default)×1')) {
+  console.error('smoke: en context must render the (默认) bucket as "(default)" (R0-P2-4) — got ' + JSON.stringify(enChipLabels))
+  process.exit(1)
+}
+if (enChipLabels.some((label) => label.includes('(默认)'))) {
+  console.error('smoke: en context must not leak the Chinese (默认) bucket label (R0-P2-4) — got ' + JSON.stringify(enChipLabels))
+  process.exit(1)
+}
+if (!enText.includes('Error rate 33% high, consider lowering level')) {
+  console.error('smoke: structured suggestionKind must render in English (R0-P2-4) — got ' + enText)
+  process.exit(1)
+}
+if (!enText.includes('Rejected Max in practice, use highest High')) {
+  console.error('smoke: rejected-levels suggestion must render in English with level labels (R0-P2-4) — got ' + enText)
+  process.exit(1)
+}
+if (enText.includes('错误率')) {
+  console.error('smoke: en context must not render the legacy Chinese suggestion string when structured fields exist (R0-P2-4)')
+  process.exit(1)
+}
+if (!textOf(enPage).includes('may still bill thinking')) {
+  console.error('smoke: off level must explain gateway billing caveat visibly (R0-P2-5)')
   process.exit(1)
 }
 
@@ -724,4 +1095,4 @@ await pageElement.props.api.settings.update({ ns: 'llm-reasoning', patch: { leve
 await pageElement.props.api.settings.mutate({ ns: 'llm-reasoning', ops: [{ op: 'unset', path: ['models', 'demo/m1'] }] })
 
 for (const timer of timers) clearTimeout(timer)
-console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, 7 write entries + 3-arg update/mutate contract stubs exercised, FEAT-004 (search add / support matrix / stats toolbar / undo / persisted tri-state) + blocked attribution + FEAT-005 level comparison asserted')
+console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, 7 write entries + 3-arg update/mutate contract stubs exercised, FEAT-004 (search add / support matrix / stats toolbar / undo / persisted tri-state) + blocked attribution + FEAT-005 level comparison + R0 fixes (probe summary tri-state counts / single-key delete undo / thinking-unreported title / non-standard level compare / CSV per-level columns / recent 100-row window / en (default)+structured suggestion / off billing note) asserted')

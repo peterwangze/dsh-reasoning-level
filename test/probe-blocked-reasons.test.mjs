@@ -98,6 +98,11 @@ test('(blocked-3) 官方适配器结局：判据可判定，且 /probe/apply 收
   })
   assert.equal(a.code, 200)
   assert.equal((a.payload.outcomes ?? [])[0].outcome, 'not-in-pi-ai-config')
+  // R0-P2-1：汇总计数源必须能区分「官方适配器管理」与「其他适配器提供」——
+  // 两者此前共用 reason=not-in-pi-ai-config，导致客户端汇总行把官方模型错算进
+  // 「不在 llm-pi-ai 配置」。outcomes 形状保持不变（旧客户端兼容）。
+  assert.deepEqual(a.payload.skipped, [{ key: 'deepseek-official/v4', reason: 'official-adapter' }],
+    '官方适配器管辖的未写入结局必须带独立 reason（官方 vs 其他适配器）')
   assert.equal(store.nsConfig.lastProbe.models['deepseek-official/v4'].persisted, 'skipped:official-adapter',
     'apply 收口不得把官方适配器归因降级回「不在 llm-pi-ai 配置」（两者是不同结局）')
 
@@ -110,6 +115,11 @@ test('(blocked-3) 官方适配器结局：判据可判定，且 /probe/apply 收
   const state2 = await mountStore(storeWithoutAdapter, async function* () { yield { type: 'finish', reason: { kind: 'stop', failure: null } } })
   const r2 = await callRoute(state2, PROBE, { provider: 'deepseek-official', model: 'v4' })
   assert.equal(r2.payload.persisted, 'skipped:not-in-pi-ai-config', '官方适配器未接线时不得声称官方管辖（判据必须可判定）')
+  const a2 = await callRoute(state2, APPLY, {
+    results: [{ key: 'deepseek-official/v4', provider: 'deepseek-official', model: 'v4', working: r2.payload.working, rejected: [], blocked: [] }],
+  })
+  assert.deepEqual(a2.payload.skipped, [{ key: 'deepseek-official/v4', reason: 'not-in-pi-ai-config' }],
+    '官方适配器未接线时 apply 不得给出 official-adapter 归因')
 })
 
 // ── ③ 客户端：旧 lastProbe（无 blockedReasons）渲染降级 ────────────────────
