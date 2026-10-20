@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.1 (2026-10-20)
+
+### Fixed
+- **v0.8.0 在 DSH 0.2.x 宿主上四个 HTTP 端点全部未挂载（MAINT-038）**：`apply()` 期一次性 `ctx.get('webServer')`，而 cordis 4 的 `ctx.get(name, strict)` 对「提供方 fiber 尚未 ACTIVE」的服务返回 `undefined`，DSH 0.2.x 代序中 webServer 又常在本插件 apply 之后才挂载——统计 / 测试 / 探测 / 固化四个端点整块被静默跳过：设置页显示「统计端点不可用」、**一键探测与固化不可用**、无任何日志。现改为 `ctx.inject(['webServer'])` 等待服务就绪再挂载——服务重启（新实例）自动重挂、同一实例重复投递幂等；宿主无 `ctx.inject` 表面时回退一次性探测；挂载异常只降级端点，绝不影响插件行加载与宿主。
+- **契约漂移不再静默**：webServer 可见但 `register` 非函数时直接 `logger.error` 给出明确指引与宿主要求（此前该形态下端点全未挂载、没有任何可读通道）；四条路由注册失败的日志去掉「duplicate」的确定归因，改为中性「duplicate route 或宿主注册面变化」。
+
+### Changed
+- `lib/host-compat.js` 新增 `HOST_SERVICES.webServerInject` 与 S4/S10 出处台账（cordis `ReflectService.get/_getImpl` strict 语义 + 兄弟项目 writing-workflow / dsh-agent-router 先例）。
+- 测试夹具（`test/harness.mjs` / `test/store-harness.mjs`）的 `ctx.inject` 改为按依赖名分派，新增 `deferWebServer` / `provideWebServer()` / `restartWebServer()` / `withoutInject` 观察面；新增 `test/http-endpoints-late-service.test.mjs`（late-1~5，旧代码 RED 4/5 的判别用例）。
+
+### Notes
+- **升级**：无需卸载，`dsh plugin update`（或重装）+ 重启 DSH 即可；无配置/数据变更，无迁移动作。
+- **回退安全**：回退到 0.8.0 会重新失去统计与探测端点（设置面/等级注入不受影响）。
+- 质量依据：Code Reviewer R0 **APPROVED_WITH_NOTES unresolved_blockers=0**（REVIEW-MAINT-038-R0：729 行语义零漂移机械比对、真实 cordis 4.0.5 生命周期实证、RED 独立复现）+ 全量回归 **113/113** + client-smoke + host-doctor 双树 **11/11** + 隔离实例 A/B（四端点 404 → 200/400/400）+ 用户重启真机验收（「已经生效」，统计端点 200、真实调用数据回显）。
+
 ## 0.8.0 (2026-10-17)
 
 ### Breaking Changes
