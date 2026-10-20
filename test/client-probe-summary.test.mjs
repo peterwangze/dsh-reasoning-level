@@ -7,8 +7,11 @@
  * 真实 lib/client.js：先跑一轮 apply 失败（摘要红），再跑一轮 apply 成功，断言
  * 摘要恢复绿色。
  *
- * 边界说明：scripts/ 不在 QA 修改边界内，N2 测试在 test/ 内自建同构 harness，
- * 不修改 client-smoke.mjs（该脚本已覆盖"渲染不崩溃"，本测试只补状态重置语义）。
+ * UX-003 适配（语义不变，只换驱动路径与断言载体）：
+ *  · 探测主按钮按 §3.1 从观测卡上移到页头 PageHeader，故按钮从 PageHeader 的
+ *    渲染树里找；点击后重新渲染页面，再把最新 probe props 传给 StatsPanel 读摘要。
+ *  · 摘要颜色按 §2.1 迁移到样式表（rl-status-ok / rl-status-bad），断言类名而非
+ *    inline style 颜色字符串——失败红/成功绿的语义保持不变。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -105,19 +108,41 @@ function collectComponents(node, into) {
 function findButton(node, label) {
   if (node === null || node === undefined || typeof node !== 'object') return null
   if (node.$$ === 'button' && (node.children ?? []).includes(label) && typeof node.props?.onClick === 'function') return node
+  // UX-003：按钮经 Button 基元（component 元素）渲染；测试遍历未渲染树，故把
+  // Button 元素视作可点击按钮（onClick 透传，与原生 button 等义）。
+  if (node.$$ === 'component' && node.tag?.name === 'Button'
+    && (node.children ?? []).includes(label) && typeof node.props?.onClick === 'function') return node
   for (const child of node.children ?? []) { const r = findButton(child, label); if (r) return r }
   return null
 }
 
-function findSummary(node) {
+/** 页头主操作：渲染 PageHeader（无 hook）后找探测按钮。 */
+function findProbeButton(pageTree, label) {
+  const components = []
+  collectComponents(pageTree, components)
+  const header = components.find(([name]) => name === 'PageHeader')
+  assert.ok(header, 'PageHeader must be reachable from the page tree')
+  return findButton(header[1](header[2]), label)
+}
+
+/** 观测卡：从页面树取最新 StatsPanel props 并渲染（StatsPanel 无 hook）。 */
+function renderStatsPanel(pageTree) {
+  const components = []
+  collectComponents(pageTree, components)
+  const stats = components.find(([name]) => name === 'StatsPanel')
+  assert.ok(stats, 'StatsPanel must be reachable from the page tree')
+  return stats[1](stats[2])
+}
+
+function findByClass(node, className) {
   if (node === null || node === undefined || typeof node !== 'object') return null
-  const style = node.props?.style
-  if (node.$$ === 'div' && style?.color !== undefined && style.fontSize === '12px' && style.marginTop === '8px') return node
-  for (const child of node.children ?? []) { const r = findSummary(child); if (r) return r }
-  return null
+  if (typeof node.props?.className === 'string' && node.props.className.split(/\s+/).includes(className)) return node
+  for (const child of node.children ?? []) { const r = findByClass(child, className); if (r) return r }
+  return findByClass(node.props?.children, className)
 }
 
 test('(N2) probeAll 重跑成功时摘要恢复绿色 —  // TDD-GUARD-N2', async () => {
+  stores.clear()
   const source = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
   vm.runInNewContext(source, sandbox, { filename: 'lib/client.js' })
   const client = sandbox.__loaded
@@ -138,43 +163,35 @@ test('(N2) probeAll 重跑成功时摘要恢复绿色 —  // TDD-GUARD-N2', asy
   factoryExports.apply(ctx)
   assert.equal(registered.length, 1)
   const pageTag = registered[0].render({}).tag
+  const pageProps = { api: API }
 
-  // ReasoningPage：loading → loaded，收集子组件
-  resetHooks('ReasoningPage'); pageTag({ api: API }); await sleep(5)
+  // ReasoningPage：loading → loaded（describe/models/stats effect 解析）
+  resetHooks('ReasoningPage'); pageTag(pageProps); await sleep(10)
+  resetHooks('ReasoningPage'); pageTag(pageProps); await sleep(10)
   resetHooks('ReasoningPage')
-  const pageTree = pageTag({ api: API })
-  const components = [['ReasoningPage', pageTag, { api: API }]]
-  collectComponents(pageTree, components)
-  const statsEntry = components.find(([name]) => name === 'StatsPanel')
-  assert.ok(statsEntry, 'StatsPanel must be reachable from the page tree')
-  const [, statsFn, statsProps] = statsEntry
-
-  // StatsPanel：loading → loaded（探测目标加载后按钮才可用）
-  resetHooks('StatsPanel'); statsFn(statsProps ?? { api: API }); await sleep(5)
-  resetHooks('StatsPanel')
-  const loadedTree = statsFn(statsProps ?? { api: API })
-  const btn1 = findButton(loadedTree, '一键探测全部模型并固化配置')
-  assert.ok(btn1, 'probeAll button not found after load')
+  const pageTree = pageTag(pageProps)
 
   // 第一轮：apply 失败 → 摘要红色（这是 N2 场景的前置）
-  // 语义色断言随 UX-001 design tokens 同步：不透明 #c62828/#2e7d32 → 半透明变体
-  // rgba(198,40,40,0.9)/rgba(46,125,50,0.9)（明暗自适应，语义不变：失败红/成功绿）
+  const btn1 = findProbeButton(pageTree, '一键探测全部模型并固化配置')
+  assert.ok(btn1, 'probeAll button not found in PageHeader after load')
   btn1.props.onClick()
-  await sleep(50)
-  resetHooks('StatsPanel')
-  const tree1 = statsFn(statsProps ?? { api: API })
-  const summ1 = findSummary(tree1)
+  await sleep(80)
+
+  resetHooks('ReasoningPage')
+  const tree1 = pageTag(pageProps)
+  const summ1 = findByClass(renderStatsPanel(tree1), 'rl-probe-summary')
   assert.ok(summ1, 'summary element must render after first probe run')
-  assert.equal(summ1.props.style.color, 'rgba(198,40,40,0.9)', '前置：失败轮摘要应为红色')
+  assert.ok(summ1.props.className.includes('rl-status-bad'), '前置：失败轮摘要应为红色')
 
   // 第二轮：apply 成功 → 摘要应为绿色（N2 期望：probeAll 起始重置 probeSummaryOk）
-  const btn2 = findButton(tree1, '一键探测全部模型并固化配置')
+  const btn2 = findProbeButton(tree1, '一键探测全部模型并固化配置')
   assert.ok(btn2)
   btn2.props.onClick()
-  await sleep(50)
-  resetHooks('StatsPanel')
-  const tree2 = statsFn(statsProps ?? { api: API })
-  const summ2 = findSummary(tree2)
+  await sleep(80)
+
+  resetHooks('ReasoningPage')
+  const tree2 = pageTag(pageProps)
+  const summ2 = findByClass(renderStatsPanel(tree2), 'rl-probe-summary')
   assert.ok(summ2, 'summary element must render after second probe run')
-  assert.equal(summ2.props.style.color, 'rgba(46,125,50,0.9)', '成功重跑后摘要应为绿色（probeSummaryOk 需在 probeAll 起始重置）')
+  assert.ok(summ2.props.className.includes('rl-status-ok'), '成功重跑后摘要应为绿色（probeSummaryOk 需在 probeAll 起始重置）')
 })

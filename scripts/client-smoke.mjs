@@ -126,6 +126,8 @@ const API = {
     }),
   },
 }
+// UX-003 §7.1①：记录页内控件实际触发的写入，用于断言 7 个写入口全部仍在。
+const writeCalls = []
 
 // ── MAINT-022：宿主 0.1.2-rc.1 客户端形状——connection.api 已移除，统一经
 // remote.settings / remote.session 命名空间（typed remote 直面 {ok,value|error}）。
@@ -167,6 +169,7 @@ const HOST_FACES = {
       assertWriteContract('settings.update', args, (patch) => {
         if (!patch || typeof patch !== 'object' || Array.isArray(patch)) contractViolation('settings.update patch must be a plain object, got ' + JSON.stringify(patch))
       })
+      writeCalls.push({ method: 'update', ns: args[0], patch: args[1] })
       return { ok: true, value: { ns: args[0], value: args[1] } }
     },
     mutate: async (...args) => {
@@ -179,6 +182,7 @@ const HOST_FACES = {
           if (!isSet && !isUnset) contractViolation(`settings.mutate ops element must be {op:"set",path:string[],value} | {op:"unset",path:string[]} (api-remotes:4759-4774), got ${JSON.stringify(op)}`)
         }
       })
+      writeCalls.push({ method: 'mutate', ns: args[0], ops: args[1] })
       return { ok: true, value: { ns: args[0], value: {} } }
     },
   },
@@ -293,9 +297,23 @@ if (!pageTextAll.includes('demo=高') || !pageTextAll.includes('≠全局最大'
 
 let rendered = 0
 let statsPanelTree = null
+// UX-003：stats/catalog 由页面拥有，页面树里收集到的 StatsPanel/ModelDefaults props
+// 已是 loaded 快照；这里补一次显式 loading 渲染，保留「每个组件都走过 loading 态」
+// 的原冒烟语义（stats===null / models===null 分支仍可能崩）。
+function loadingProps(name, props) {
+  if (name === 'StatsPanel') return { ...props, stats: null, statsFailed: false }
+  if (name === 'ModelDefaults') return { ...props, models: null }
+  return props
+}
 for (const [name, fn, props] of components) {
   if (typeof fn !== 'function') continue
-  const tree = await renderTwice(name, fn, props ?? pageElement.props)
+  const resolvedProps = props ?? pageElement.props
+  if (name === 'StatsPanel' || name === 'ModelDefaults') {
+    resetHooks(name)
+    fn(loadingProps(name, resolvedProps))
+    await effectsRan()
+  }
+  const tree = await renderTwice(name, fn, resolvedProps)
   if (name === 'StatsPanel') statsPanelTree = tree
   rendered += 1
 }
@@ -336,6 +354,51 @@ if (pageTextAll.includes('默认物化后的最终值')) {
   process.exit(1)
 }
 
+// ── 2e. UX-003 §7.1①：7 个写入口全部保留（结构遍历 → 实际触发页面 change）────
+// （enabled / level / syncDefaultAgent / models 增改 / 删除 / purposes.compaction /
+//  purposes.session-title；调用形状仍经适配层三参桩校验）
+// collectComponents 按组件名去重（供逐组件渲染）；写入口断言需要收集同名基元的
+// 全部实例（如两个 Switch），故单独遍历。
+const switchEntries = []
+;(function collectSwitches(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (node.$$ === 'component' && node.tag?.name === 'Switch') switchEntries.push(node.props)
+  for (const child of node.children ?? []) collectSwitches(child)
+  collectSwitches(node.props?.children)
+})(pageTree)
+const segmentedEntry = components.find(([name]) => name === 'SegmentedControl')
+const modelDefaultsEntry = components.find(([name]) => name === 'ModelDefaults')
+const purposeDefaultsEntry = components.find(([name]) => name === 'PurposeDefaults')
+const enableCtl = switchEntries.find((props) => props.label === '启用统一默认推理等级')
+const syncCtl = switchEntries.find((props) => props.label === '同步默认 agent 模型等级')
+if (enableCtl === undefined || syncCtl === undefined || segmentedEntry === undefined
+  || modelDefaultsEntry === undefined || purposeDefaultsEntry === undefined) {
+  console.error('smoke: UX-003 write-entry controls missing (enabled/level/sync/models/purposes)')
+  process.exit(1)
+}
+enableCtl.onChange(false)
+segmentedEntry[2].onChange('xhigh')
+syncCtl.onChange(true)
+modelDefaultsEntry[2].onChange({ models: { 'demo/m1': 'max' } })
+modelDefaultsEntry[2].onChange({ removeModelKey: 'demo/m1' })
+purposeDefaultsEntry[2].onChange({ purposes: { compaction: 'off' } })
+purposeDefaultsEntry[2].onChange({ purposes: { 'session-title': 'low' } })
+await effectsRan()
+const updatePatches = writeCalls.filter((call) => call.method === 'update').map((call) => call.patch)
+const deleteCall = writeCalls.find((call) => call.method === 'mutate')
+const writeEntryOk = updatePatches.some((patch) => patch.enabled === false)
+  && updatePatches.some((patch) => patch.level === 'xhigh')
+  && updatePatches.some((patch) => patch.syncDefaultAgent === true)
+  && updatePatches.some((patch) => patch.models !== undefined && patch.models['demo/m1'] === 'max')
+  && updatePatches.some((patch) => patch.purposes !== undefined && patch.purposes.compaction === 'off')
+  && updatePatches.some((patch) => patch.purposes !== undefined && patch.purposes['session-title'] === 'low')
+  && deleteCall !== undefined
+  && JSON.stringify(deleteCall.ops) === JSON.stringify([{ op: 'unset', path: ['models', 'demo/m1'] }])
+if (!writeEntryOk) {
+  console.error('smoke: UX-003 7 write entries must still route to settings.update/mutate — got ' + JSON.stringify(writeCalls))
+  process.exit(1)
+}
+
 // ── 3. MAINT-025 (b)：写路径经真实适配层驱动契约桩。旧冒烟从不触发写路径，
 // 契约桩不承重 = 防护形同虚设；此步让 update/mutate 的元数/形状校验真实执行
 // （调用形状 = 页面 change() 的实际形状，锚定 lib/client.js:766-772——页面不传
@@ -344,4 +407,4 @@ await pageElement.props.api.settings.update({ ns: 'llm-reasoning', patch: { leve
 await pageElement.props.api.settings.mutate({ ns: 'llm-reasoning', ops: [{ op: 'unset', path: ['models', 'demo/m1'] }] })
 
 for (const timer of timers) clearTimeout(timer)
-console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, write-path contract stubs exercised (3-arg update/mutate)')
+console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, 7 write entries + 3-arg update/mutate contract stubs exercised')

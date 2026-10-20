@@ -122,6 +122,9 @@ function newHostCtx({ calls } = {}) {
 const fetchStub = async () => ({ ok: true, status: 200, json: async () => ({ since: Date.now(), totalCalls: 0, models: {}, recent: [], blacklist: {} }) })
 
 function loadClient() {
+  // 每个用例 = 一次独立挂载：页面 hook 数量随 UX-003 页面骨架增长，若沿用同一
+  // store，上一用例的 view/stats 会串到下一用例（React 真实挂载不会这样）。
+  stores.clear()
   const sandbox = {
     window: {
       __ModuleLoader__: { load(def) { sandbox.__loaded = def } },
@@ -174,8 +177,20 @@ function findText(node, needle, depth = 0) {
 function findButton(node, label) {
   if (node === null || node === undefined || typeof node !== 'object') return null
   if (node.$$ === 'button' && (node.children ?? []).includes(label) && typeof node.props?.onClick === 'function') return node
+  // UX-003：按钮统一经 Button 基元（component 元素）；测试遍历的是未渲染树，
+  // 因此把 Button 元素本身当作可点击按钮（onClick 透传，语义与原生一致）。
+  if (node.$$ === 'component' && node.tag?.name === 'Button'
+    && (node.children ?? []).includes(label) && typeof node.props?.onClick === 'function') return node
   for (const child of node.children ?? []) { const r = findButton(child, label); if (r) return r }
   return findButton(node.props?.children, label)
+}
+
+/** UX-003：全局等级控件从 <select> 升级为 SegmentedControl（radiogroup）。 */
+function findSegmented(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return null
+  if (node.$$ === 'component' && node.tag?.name === 'SegmentedControl' && typeof node.props?.onChange === 'function') return node
+  for (const child of node.children ?? []) { const r = findSegmented(child); if (r) return r }
+  return findSegmented(node.props?.children)
 }
 
 test('(MAINT-022) 模块 inject 声明新面命名空间、不再依赖 connection — // TDD-GUARD-MAINT-022', () => {
@@ -269,18 +284,11 @@ test('(MAINT-022) change 经 remote.settings.update（全局等级变更）— /
   const updateCall = calls.find((c) => Array.isArray(c) && c[0] === 'settings.update')
   assert.ok(!updateCall, '无变更不应触发 update（前置）')
 
-  // 从树中找到 level 下拉的 onChange（全局默认等级选择器）
-  let levelSelect = null
+  // 从树中找到 SegmentedControl 的 onChange（全局默认等级选择器，UX-003 §3.3）
   resetHooks('ReasoningPage')
-  ;(function find(node) {
-    if (node === null || node === undefined || typeof node !== 'object' || levelSelect) return
-    if (node.$$ === 'select' && typeof node.props?.onChange === 'function' && Array.isArray(node.children) && node.children.some((c) => typeof c === 'object' && c.$$ === 'option' && c.props?.value === 'xhigh')) levelSelect = node.props
-    for (const child of node.children ?? []) find(child)
-    find(node.props?.children)
-  })(pageTag(pageProps))
-  assert.ok(levelSelect, '全局等级下拉必须存在')
-
-  levelSelect.onChange({ target: { value: 'medium' } })
+  const segmented = findSegmented(pageTag(pageProps))
+  assert.ok(segmented, '全局等级分段控件必须存在')
+  segmented.props.onChange('medium')
   await sleep(20)
   const update = calls.find((c) => Array.isArray(c) && c[0] === 'settings.update')
   assert.ok(update, '选择等级必须经 remote.settings.update')
@@ -302,17 +310,11 @@ test('(MAINT-025) 写路径三参判别：update/mutate 必须按宿主 0.1.2-rc
   resetHooks('ReasoningPage')
   pageTag(pageProps); await sleep(10)
 
-  // 写路径①：全局等级下拉 → update（change({level}) 调用形状锚定 lib/client.js:818）
-  let levelSelect = null
+  // 写路径①：全局等级分段控件 → update（change({level})，UX-003 后由 SegmentedControl 承担）
   resetHooks('ReasoningPage')
-  ;(function find(node) {
-    if (node === null || node === undefined || typeof node !== 'object' || levelSelect) return
-    if (node.$$ === 'select' && typeof node.props?.onChange === 'function' && Array.isArray(node.children) && node.children.some((c) => typeof c === 'object' && c.$$ === 'option' && c.props?.value === 'xhigh')) levelSelect = node.props
-    for (const child of node.children ?? []) find(child)
-    find(node.props?.children)
-  })(pageTag(pageProps))
-  assert.ok(levelSelect, '全局等级下拉必须存在')
-  levelSelect.onChange({ target: { value: 'low' } })
+  const segmented = findSegmented(pageTag(pageProps))
+  assert.ok(segmented, '全局等级分段控件必须存在')
+  segmented.props.onChange('low')
   await sleep(20)
 
   // 元数契约：宿主描述符 update = [ns, patch, expectedRevision]（api-remotes:5216-5253），
