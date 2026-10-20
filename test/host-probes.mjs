@@ -31,6 +31,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, relative } from 'node:path'
 import vm from 'node:vm'
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import { HOST_EVENTS, HOST_REMOTE_CONTRACT, HOST_PROVENANCE } from '../lib/host-compat.js'
 
 export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -335,7 +336,16 @@ export async function loadApiRemotesContributions(pkgDir) {
   const sandbox = { window: { __ModuleLoader__: { load(def) { loaded = def } } } }
   vm.runInNewContext(readFileSync(clientFile, 'utf8'), sandbox, { filename: clientFile })
   if (!loaded || loaded.id !== '@deepseek-ai/dsh-api-remotes') throw new Error(`api-remotes bundle 未能经 __ModuleLoader__ 契约捕获（C1 形态断裂）：${clientFile}`)
-  const exports = loaded.factory(() => { throw new Error('host api-remotes bundle required unexpected module') })
+  // MAINT-037（dsh 0.2.1-rc.2）：宿主 api-remotes client bundle 起以外部 require
+  // 消费 zod（0.2.0 及更早为零外部 require；宿主平坦树 zod@4.6.7 实证在位，
+  // devDeps 基线同步增锁）。按名解析**真实** zod（createRequire(pkgDir)——
+  // 活树走宿主平坦树 / 基线走本仓 node_modules，工件源同 doctor 双源语义），
+  // 保持对未知模块的严格拒绝（真出现下一个新外部依赖时探针仍会 fail-loud）。
+  const pkgRequire = createRequire(join(pkgDir, 'package.json'))
+  const exports = loaded.factory((name) => {
+    if (name === 'zod') return pkgRequire('zod')
+    throw new Error('host api-remotes bundle required unexpected module: ' + name)
+  })
   const contributions = []
   const disposer = await exports.apply({
     remote: { $mount: async (contribution) => { contributions.push(contribution); return async () => {} } },
