@@ -491,22 +491,39 @@ if (!writeEntryOk) {
 }
 
 // ── 2f. FEAT-004 §3.4.1：模型级默认改为可搜索添加（点击候选 → models 深合并）────
-// （长 <select> 移除后，「catalog 模型可被添加」的语义载体 = 候选行 data-model-key；
-//  点击即写入最高支持档 max，调用形状仍是 update({ns, patch})）
-const mdLoadedTree = await renderTwice('ModelDefaults', modelDefaultsEntry[1], {
-  ...modelDefaultsEntry[2],
-  lastProbe: STATS_FIXTURE.lastProbe,
-})
-const searchCandidates = []
-;(function collectCandidates(node) {
+// （2026-10-21 真机反馈后语义变更：**空输入不铺候选列表**——一进页面就压出 20 条模型
+//  是噪音。因此这里先断言「空输入无候选」，再模拟输入触发过滤，最后点击候选。）
+const mdProps = { ...modelDefaultsEntry[2], lastProbe: STATS_FIXTURE.lastProbe }
+function collectByProps(node, predicate, into) {
   if (node === null || node === undefined || typeof node !== 'object') return
-  if (typeof node.props?.['data-model-key'] === 'string' && typeof node.props?.onClick === 'function') searchCandidates.push(node)
-  for (const child of node.children ?? []) collectCandidates(child)
-  collectCandidates(node.props?.children)
-})(mdLoadedTree)
+  if (predicate(node)) into.push(node)
+  for (const child of node.children ?? []) collectByProps(child, predicate, into)
+  collectByProps(node.props?.children, predicate, into)
+}
+resetHooks('ModelDefaults')
+const mdEmptyTree = modelDefaultsEntry[1](mdProps)
+await effectsRan()
+const emptyCandidates = []
+collectByProps(mdEmptyTree, (node) => typeof node.props?.['data-model-key'] === 'string', emptyCandidates)
+if (emptyCandidates.length !== 0) {
+  console.error('smoke: model search must NOT list candidates while the query is empty (noise removal) — got ' + emptyCandidates.length)
+  process.exit(1)
+}
+const searchFields = []
+collectByProps(mdEmptyTree, (node) => node.$$ === 'component' && typeof node.tag?.name === 'string' && node.tag.name === 'SearchField', searchFields)
+if (searchFields.length !== 1) {
+  console.error('smoke: ModelDefaults must render exactly one SearchField, got ' + searchFields.length)
+  process.exit(1)
+}
+searchFields[0].props.onChange('demo')
+resetHooks('ModelDefaults')
+const mdLoadedTree = modelDefaultsEntry[1](mdProps)
+await effectsRan()
+const searchCandidates = []
+collectByProps(mdLoadedTree, (node) => typeof node.props?.['data-model-key'] === 'string' && typeof node.props?.onClick === 'function', searchCandidates)
 const addCandidate = searchCandidates.find((node) => node.props['data-model-key'] === 'demo/m1')
 if (addCandidate === undefined) {
-  console.error('smoke: model search must list catalog candidates (demo/m1) for click-to-add (FEAT-004 §3.4.1)')
+  console.error('smoke: typing a query must list matching catalog candidates (demo/m1) for click-to-add (FEAT-004 §3.4.1)')
   process.exit(1)
 }
 const writesBeforeAdd = writeCalls.length

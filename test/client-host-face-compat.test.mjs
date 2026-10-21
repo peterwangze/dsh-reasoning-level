@@ -260,16 +260,33 @@ test('(MAINT-022) ModelDefaults 经 session.modelCatalog 加载模型列表 — 
   const tree = fn(props)
   await sleep(10)
   assert.ok(calls.includes('session.modelCatalog'), 'remote.session.modelCatalog 必须被调用（ModelDefaults 数据面）')
-  // 模型候选（FEAT-004：长 <select> 换成可搜索结果列表，候选行仍携带 catalog 的
-  // provider/model 键；语义 = catalog 模型可被添加，只同步选择器载体）
-  const candidates = []
-  ;(function collectCandidates(node) {
+  // 空输入不再铺候选（2026-10-21 真机反馈）：先确认空态无候选，再模拟输入触发过滤，
+  // 断言 catalog 里的模型可被搜到并可点击添加（载体 = data-model-key）。
+  const collectCandidatesIn = (root) => {
+    const found = []
+    ;(function walk(node) {
+      if (node === null || node === undefined || typeof node !== 'object') return
+      if (typeof node.props?.['data-model-key'] === 'string') found.push(node.props['data-model-key'])
+      for (const child of node.children ?? []) walk(child)
+      walk(node.props?.children)
+    })(root)
+    return found
+  }
+  assert.deepEqual(collectCandidatesIn(tree), [], '空输入不得渲染候选列表（噪音）')
+  const searchFields = []
+  ;(function walk(node) {
     if (node === null || node === undefined || typeof node !== 'object') return
-    if (typeof node.props?.['data-model-key'] === 'string') candidates.push(node.props['data-model-key'])
-    for (const child of node.children ?? []) collectCandidates(child)
-    collectCandidates(node.props?.children)
+    if (node.$$ === 'component' && node.tag?.name === 'SearchField') searchFields.push(node)
+    for (const child of node.children ?? []) walk(child)
+    walk(node.props?.children)
   })(tree)
-  assert.ok(candidates.includes('demo/m1'), '模型搜索结果必须包含 catalog 中的 demo/m1，实际：' + JSON.stringify(candidates))
+  assert.equal(searchFields.length, 1, 'ModelDefaults 必须渲染一个搜索框')
+  searchFields[0].props.onChange('demo')
+  resetHooks('ModelDefaults')
+  const typedTree = fn(props)
+  await sleep(10)
+  const candidates = collectCandidatesIn(typedTree)
+  assert.ok(candidates.includes('demo/m1'), '输入后搜索结果必须包含 catalog 中的 demo/m1，实际：' + JSON.stringify(candidates))
 })
 
 test('(MAINT-022) change 经 remote.settings.update（全局等级变更）— // TDD-GUARD-MAINT-022', async () => {

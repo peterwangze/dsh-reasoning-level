@@ -130,11 +130,35 @@ const html = `<!doctype html>
 <style>
   body { margin: 0; padding: 24px; background: #ffffff; color: #1a1a1a; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif }
   .panel { width: ${panelWidth}px; border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; background: #fafafa }
+  .gap { height: 16px }
   ${stylesheet}
 </style></head>
 <body><div class="panel"><div class="rl-root">
-  <div class="rl-card"><h3 class="rl-card-title">实测探测（复刻）</h3>${probeTable}</div>
-  <div class="rl-card" style="margin-top:16px"><h3 class="rl-card-title">模型聚合（复刻）</h3>${statsTable}</div>
+  <div class="rl-card"><h3 class="rl-card-title">模型级默认（空输入态：不再铺候选列表）</h3>
+    <div class="rl-field">
+      <div class="rl-field-label">添加模型默认</div>
+      <input type="search" class="rl-search" placeholder="搜索模型（provider/model）">
+    </div>
+    <div class="rl-hint">未配置模型级默认；所有未显式选择等级的调用使用全局默认。</div>
+  </div>
+  <div class="gap"></div>
+  <div class="rl-card"><h3 class="rl-card-title">输入后：过滤候选（点击即添加）</h3>
+    <div class="rl-field">
+      <div class="rl-field-label">添加模型默认</div>
+      <input type="search" class="rl-search" value="cucloud">
+      <div class="rl-field-hint">输入完整 provider/model 键可直接添加</div>
+      <div class="rl-search-wrap">
+        <div class="rl-search-list">
+          <button class="rl-search-item"><span class="rl-search-item-main">cucloud / DeepSeek-V4-Pro</span><span class="rl-search-item-chips">${chips(['关闭', '极低', '低', '中', '高', '极高', '最大'], '')}</span></button>
+          <button class="rl-search-item"><span class="rl-search-item-main">cucloud / DeepSeek-V4-Flash</span><span class="rl-search-item-chips">${chips(['关闭', '极低', '低', '中', '高', '极高', '最大'], '')}</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="gap"></div>
+  <div class="rl-card"><h3 class="rl-card-title">实测探测</h3>${probeTable}</div>
+  <div class="gap"></div>
+  <div class="rl-card"><h3 class="rl-card-title">模型聚合</h3>${statsTable}</div>
 </div></div></body></html>`
 
 const outDir = join(root, 'tmp')
