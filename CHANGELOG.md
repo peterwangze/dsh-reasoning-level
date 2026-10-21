@@ -26,6 +26,13 @@
 
 ### Fixed
 - **本地 `node --test` 基线红（MAINT-039）**：`contract-guard` 的 guard-1 用例直接断言 `$DSH_HOME/storages/reasoning-level-migrated.json` 不存在，而任何真正用过本插件的机器上该文件真实存在 → 门禁恒红，真回归会被淹没。改为「mount 前后快照对比」（原本不存在则仍不存在；原本存在则 mtime/size 不变），语义（自禁用路径零落盘）不变。
+- **真机首轮观感反馈的四类可判定缺陷（2026-10-21）**：
+  - 探测结果/统计表在宿主设置面板（内容区约 860px）里**放不下**：「实测可用等级」的 7 个 chip 被挤成 7 行、统计表右端「平均耗时」被裁掉。改为所有表格包 `overflow-x` 滚动容器 + 列 `min-width` 策略；探测表 **5 列合并为 4 列**（「实测拒绝」与「其他错误」→「不可用」：红=拒绝 / 黄=失败），统计表**去掉独立「建议」列**（改为模型名下的警示小字），8 列 → 7 列。
+  - 聚合网关用**枚举式**错误拒绝档位（`Invalid option: expected one of "off"|"low"|…`），旧判据只认 `reasoning effort "X"` 字样 → 整段 JSON 被铺进「其他错误」列。新增枚举证据判定（枚举语义 + ≥3 个 effort 词 + 被请求档不在枚举 → 归 `rejected`），并收窄客户端归因规则（原来任何含 `model` 的消息都会被说成「模型不存在」）。
+  - 大数字直接铺在单元格里（`~30926344 字` / `9263006 tok` / `18943ms`）→ 紧凑格式（`~30.9M 字` / `9.26M tok` / `18.9s`），原始值放 `title`。
+
+### 开发工具
+- 新增 `npm run ui:preview`（`scripts/ui-preview.mjs`）：从 `lib/client.js` 抽取**真实 STYLESHEET** 生成静态复刻页并用 Playwright 截图。`client-smoke` 只能证明「渲染不抛错」，证明不了「表格没被挤成一列」——本工具让观感问题可以被复现、被对比、被回归。不参与 CI。
 
 ### Notes
 - **零破坏**：配置 schema、`llm-reasoning` 字段语义、7 条写路径调用形状、宿主导出契约（`hostApiFace` / `HOST_REMOTE_CONTRACT`）**均未变更**。新增的 `byLevel` / `blockedReasons` 是纯追加字段——旧客户端忽略即可工作，新客户端在旧服务端下优雅降级。
