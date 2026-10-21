@@ -977,14 +977,30 @@ const manyRecent = Array.from({ length: 100 }, (_, index) => ({
 }))
 stores.delete('StatsPanel')
 const recentTree = renderStats({ ...statsEntry[2], stats: { ...csvStats, recent: manyRecent } })
+// 精确定位「最近调用」表再数行：早先版本按「7 个 td 的 tr」全局计数，聚合表列数
+// 一改（8→7）就会把聚合行误算进来——那是计数器写法的问题，不是表格的问题。
+let recentTable = null
+;(function findRecentTable(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  const cls = node.props !== undefined && typeof node.props.className === 'string' ? node.props.className : ''
+  if (node.$$ === 'table' && cls.includes('rl-recent-table')) { recentTable = node; return }
+  for (const child of node.children ?? []) findRecentTable(child)
+  findRecentTable(node.props?.children)
+})(recentTree)
+if (recentTable === null) {
+  console.error('smoke: recent-calls table must carry the rl-recent-table class (structure guard)')
+  process.exit(1)
+}
 let recentRowCount = 0
 ;(function countRecentRows(node) {
   if (node === null || node === undefined || typeof node !== 'object') return
-  if (node.$$ === 'tr' && Array.isArray(node.children) && node.children.length === 7
-    && node.children.every((cell) => cell !== null && typeof cell === 'object' && cell.$$ === 'td')) recentRowCount += 1
+  if (node.$$ === 'tbody') {
+    recentRowCount += (node.children ?? []).filter((row) => row !== null && typeof row === 'object' && row.$$ === 'tr').length
+    return
+  }
   for (const child of node.children ?? []) countRecentRows(child)
   countRecentRows(node.props?.children)
-})(recentTree)
+})(recentTable)
 if (recentRowCount !== 100) {
   console.error('smoke: recent-calls table must render the full 100-row wire window to match 「最近 100 条」 (R0-P3-7) — got ' + recentRowCount)
   process.exit(1)
@@ -992,6 +1008,43 @@ if (recentRowCount !== 100) {
 if (!toolbarMetas.some((meta) => meta.includes('最近 100 条'))) {
   console.error('smoke: stats toolbar meta must stay aligned with the rendered recent window (100) (R0-P3-7)')
   process.exit(1)
+}
+
+// ── 2o. 布局回归（2026-10-21 真机反馈）：表格必须包在滚动容器里 ──────────────
+// 宿主设置面板宽度有限：不包 `.rl-table-wrap`（或 `.rl-matrix-wrap`）时，列的
+// min-width 撑不开 table，chips 列会被压到 90px → 7 个 chip 竖排成 7 行（用户截图）。
+// 这条断言防止后续「顺手去掉 wrapper」把布局退回旧形态。
+function collectTables(node, insideWrap, into) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  const cls = node.props !== undefined && typeof node.props.className === 'string' ? node.props.className : ''
+  const wrapped = insideWrap || cls.includes('rl-table-wrap') || cls.includes('rl-matrix-wrap')
+  if (node.$$ === 'table') into.push({ wrapped, className: cls, node })
+  for (const child of node.children ?? []) collectTables(child, wrapped, into)
+  collectTables(node.props?.children, wrapped, into)
+}
+const tables = []
+collectTables(recentTree, false, tables)
+if (tables.length === 0) {
+  console.error('smoke: expected at least one table in StatsPanel to assert wrap contract')
+  process.exit(1)
+}
+const unwrapped = tables.filter((item) => item.wrapped !== true)
+if (unwrapped.length > 0) {
+  console.error('smoke: every table must sit inside .rl-table-wrap/.rl-matrix-wrap (layout regression) — unwrapped: '
+    + unwrapped.map((item) => item.className).join(', '))
+  process.exit(1)
+}
+// 探测结果表：合并「拒绝/失败」后是 4 列（模型 / 可用 / 不可用 / 持久化）——
+// 5 列表在宿主面板里放不下是这次真机反馈的根因，不允许退回。
+const probeTables = tables.filter((item) => item.className.includes('rl-probe-table'))
+for (const item of probeTables) {
+  const headRow = (item.node.children ?? []).find((child) => child !== null && typeof child === 'object' && child.$$ === 'thead')
+  const headerCells = headRow !== undefined ? (headRow.children ?? []) : []
+  const thCount = headerCells.reduce((sum, tr) => sum + ((tr?.children ?? []).filter((c) => c !== null && typeof c === 'object' && c.$$ === 'th').length), 0)
+  if (thCount !== 4) {
+    console.error('smoke: probe results table must stay 4 columns (rejected+failed merged) — got ' + thCount)
+    process.exit(1)
+  }
 }
 
 // ── 2n. R0-P2-4：en 语境 —— (默认) 显示映射 + 结构化 suggestion + off 计费说明 ─

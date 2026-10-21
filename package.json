@@ -37,7 +37,8 @@
     "README.md"
   ],
   "scripts": {
-    "host:doctor": "node scripts/host-doctor.mjs"
+    "host:doctor": "node scripts/host-doctor.mjs",
+    "ui:preview": "node scripts/ui-preview.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",

@@ -66,7 +66,25 @@ RCA 2026-10-20 起 `ctx.inject` **按依赖名分派**（['settings'] / ['webSer
   客户端按「未知原因」降级不崩；`skipped:official-adapter` 判据（provider 白名单 +
   llm-deepseek 设置节已注册 + 非 pi-ai 配置）与 /probe/apply 收口不降级；
 - `resolve-fallback.test.mjs` T2：`$DSH_HOME` 优先（临时伪造树子进程集成）+ 回退
-  ~/.dsh（单元 + 反向验证）。
+  ~/.dsh（单元 + 反向验证）；
+- `probe-enum-rejection.test.mjs` **枚举式拒绝归类守卫**（2026-10-21 真机反馈）：网关
+  用 `Invalid option: expected one of "off"|…` 拒绝某档时归 `rejected` 而非 `blocked`；
+  反例三条同时锁定——枚举里**含**该档仍归 blocked、effort 词 <3 个不臆断、传输类错误
+  不被枚举规则吞掉。
+
+## 手动视觉校验（不参与 CI）
+
+`client-smoke` 只能证明「渲染不抛错」，证明不了「表格没被挤成一列 chips」。需要看真实
+布局时：
+
+```sh
+npm run ui:preview            # 产出 tmp/ui-preview.html + .png（默认 820px 面板）
+npm run ui:preview -- --width 860
+```
+
+它从 `lib/client.js` 抽取**真实 STYLESHEET**（唯一事实源，不复制样式），拼出探测结果表
+与模型聚合表的静态复刻页，再用 Playwright 截图。Playwright 通过 `PLAYWRIGHT_HOME`
+或本机 `dev_toolchain/browser_test_tool_list` 解析；缺失时只产出 HTML 不失败。
 
 ## 依赖说明
 

@@ -5,3 +5,6 @@ node_modules/
 
 # governance runtime records (local only)
 .governance/
+
+# 本地生成物（ui-preview 截图等，不参与发布）
+tmp/
