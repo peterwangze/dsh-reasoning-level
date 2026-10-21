@@ -1,9 +1,9 @@
 # Changelog
 
-## 0.9.0 (2026-10-20)
+## 0.9.0 (2026-10-21)
 
 ### Added
-- **等级代价洞察（FEAT-005）——回答「max 到底值不值」**：统计聚合新增 **per-level 桶**（每个「模型 × 等级」的调用数 / 思考 tokens / 输出 tokens / 思考字符 / 耗时 / 错误数），设置页新增「**等级对比**」视图——同一模型在两个等级上的平均耗时与输出量直接并排。这是本版最重要的一件事：本机真实数据里 81,926 次调用几乎全部走 `max`（`glm-5.3` 的 `max` 20,084 次 vs `high` 5 次），而插件此前**没有任何信息**能回答「降一档能省多少、慢多少」。
+- **等级代价洞察（FEAT-005）——回答「max 到底值不值」**：统计聚合新增 **per-level 桶**（每个「模型 × 等级」的调用数 / 思考 tokens / 输出 tokens / 思考字符 / 耗时 / 错误数），设置页新增「**等级对比**」视图——同一模型在两个等级上的平均耗时与输出量直接并排。这是本版最重要的一件事：本机 2026-10-20 实测 81,926 次调用里，`zai-coding-cn/glm-5.3` 的 20,148 次调用有 20,084 次是 `max`、63 次走默认、1 次 `off`——**一次 `high` 都没有**；整个环境里 `high` 只出现过个位数（`glm-local/glm-5.3` 5 次）。插件此前**没有任何信息**能回答「降一档能省多少、慢多少」。
   - 统计快照新增 `models[*].byLevel`（受控键：7 档 + `(默认)`）；在**本版之后产生的调用**上 `Σ byLevel.calls === Σ efforts === calls` 有判别测试锁定（升级前已有快照没有 per-level 拆分，历史计数不参与该等式——这条边界由测试显式锁定，不做假设）。
   - **诚实边界**：历史调用没有 per-level 拆分（旧快照无该字段），视图会明示「数据自 v0.9.0 起累积」，**不会**用 `efforts` 计数反推 token/耗时。
 - **探测归因（FEAT-004 ⑦）——把「全 blocked」黑盒变成可读结论**：`/probe` 内部早已采到每个档位的 `code/message/kind`，客户端此前直接丢弃。现在：
@@ -37,10 +37,10 @@
 - 新增 `npm run ui:preview`（`scripts/ui-preview.mjs`）：从 `lib/client.js` 抽取**真实 STYLESHEET** 生成静态复刻页并用 Playwright 截图。`client-smoke` 只能证明「渲染不抛错」，证明不了「表格没被挤成一列」——本工具让观感问题可以被复现、被对比、被回归。不参与 CI。
 
 ### Notes
-- **零破坏**：配置 schema、`llm-reasoning` 字段语义、7 条写路径调用形状、宿主导出契约（`hostApiFace` / `HOST_REMOTE_CONTRACT`）**均未变更**。新增的 `byLevel` / `blockedReasons` 是纯追加字段——旧客户端忽略即可工作，新客户端在旧服务端下优雅降级。
+- **零破坏**：`llm-reasoning` 字段语义、7 条写路径调用形状、`cordis.patch.yml` 的 entry id（`llm-reasoning`）、宿主导出契约（`hostApiFace` / `HOST_REMOTE_CONTRACT`）**均未变更**；配置 schema **只追加可选字段**（`lastProbe.models.*.blockedReasons`），既有字段形状不动，旧配置无需迁移。新增的 `byLevel` / `blockedReasons` / `suggestionKind` 对旧客户端与旧服务端都是可忽略的追加项。
 - **升级**：`dsh plugin update`（或重装）+ 重启 DSH，**无需卸载、无数据迁移**。等级对比数据从本版开始累积。
 - **已知边界**：CSV 已追加 per-level calls 列（7 档 + `(默认)`；既有 8 列语义不变），探测归因 `blockedReasons` 仍只在结果表/title 展示、未进 CSV；3 秒撤销/自动消失的真实浏览器行为需真机复验（测试沙箱以桩替代 `window.setTimeout`）。
-- 质量依据：全量回归 **128/128**、`client-smoke` 11 组件 + 7 写入口实驱断言 + R0 返工断言、`host:doctor` 双树 **11/11 PASS**、独立 Code Reviewer 结论见 `.governance/review-FEAT-003+UX-003+FEAT-004+FEAT-005-R0-report.md`（R0 的 P2/P3 已按报告返工：probeDone 三态汇总、撤销单键写回、i18n 建议结构化、off 计费提示、schema 注释校正、等级对比空态分流、CSV per-level 列与最近调用 100 行对齐）。
+- 质量依据：全量回归 **132/132**、`client-smoke` 11 组件 + 7 写入口实驱断言 + R0 返工断言、`host:doctor` 双树 **11/11 PASS**、独立 Code Reviewer 结论见 `.governance/review-FEAT-003+UX-003+FEAT-004+FEAT-005-R0-report.md`（R0 的 P2/P3 已按报告返工：probeDone 三态汇总、撤销单键写回、i18n 建议结构化、off 计费提示、schema 注释校正、等级对比空态分流、CSV per-level 列与最近调用 100 行对齐）。
 ## 0.8.1 (2026-10-20)
 
 ### Fixed
