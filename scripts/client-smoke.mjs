@@ -1094,14 +1094,34 @@ if (unwrapped.length > 0) {
 // 探测结果表：合并「拒绝/失败」后是 4 列（模型 / 可用 / 不可用 / 持久化）——
 // 5 列表在宿主面板里放不下是这次真机反馈的根因，不允许退回。
 const probeTables = tables.filter((item) => item.className.includes('rl-probe-table'))
-for (const item of probeTables) {
+const countHeaderCells = (item) => {
   const headRow = (item.node.children ?? []).find((child) => child !== null && typeof child === 'object' && child.$$ === 'thead')
   const headerCells = headRow !== undefined ? (headRow.children ?? []) : []
-  const thCount = headerCells.reduce((sum, tr) => sum + ((tr?.children ?? []).filter((c) => c !== null && typeof c === 'object' && c.$$ === 'th').length), 0)
+  return headerCells.reduce((sum, tr) => sum + ((tr?.children ?? []).filter((c) => c !== null && typeof c === 'object' && c.$$ === 'th').length), 0)
+}
+for (const item of probeTables) {
+  const thCount = countHeaderCells(item)
   if (thCount !== 4) {
     console.error('smoke: probe results table must stay 4 columns (rejected+failed merged) — got ' + thCount)
     process.exit(1)
   }
+}
+// 模型聚合表：8 列 → 7 列（建议并入模型名）→ 6 列（错误率并入调用数）——两次真机
+// 反馈都是「右端被裁」。列数回涨即红。
+const aggTables = tables.filter((item) => item.className.includes('rl-stats-table') && !item.className.includes('rl-recent-table'))
+for (const item of aggTables) {
+  const thCount = countHeaderCells(item)
+  if (thCount !== 6) {
+    console.error('smoke: model aggregate table must stay 6 columns (suggestion + error-rate merged) — got ' + thCount)
+    process.exit(1)
+  }
+}
+// 固定列宽是 chips 能并排的前提（自动布局下 chips 列会被压到 70-90px 再竖排）。
+// 样式表里没有 table-layout: fixed ≈ 布局会退回旧形态，直接判红。
+const pageSource = readFileSync(join(root, 'lib/client.js'), 'utf8')
+if (!pageSource.includes('table-layout: fixed')) {
+  console.error('smoke: stylesheet must keep table-layout: fixed (chips would collapse into one column per line)')
+  process.exit(1)
 }
 
 // ── 2n. R0-P2-4：en 语境 —— (默认) 显示映射 + 结构化 suggestion + off 计费说明 ─

@@ -93,10 +93,10 @@ const probeTable = `
 
 // ── 复刻「模型聚合」表（真实数据 + 紧凑数字格式）──────────────────────────
 const statRows = [
-  { model: 'zai-coding-cn/glm-5.3', calls: '20.1k', dist: [['(默认)×63', ''], ['最大×20.1k', 'primary'], ['关闭×1', '']], think: '~30.9M 字', out: '17.6M', dur: '18.9s' },
-  { model: 'deepseek-official/deepseek-flash', calls: '19.6k', dist: [['(默认)×40', ''], ['最大×19.6k', 'primary'], ['关闭×2', '']], think: '9.26M tok', out: '20.7M', dur: '13.8s' },
-  { model: 'zai-coding-cn/glm-5.3-flash', calls: '10.8k', dist: [['最大×10.8k', 'primary'], ['(默认)×4', '']], think: '~23.8M 字', out: '11.6M', dur: '27.4s' },
-  { model: 'command-code/deepseek/deepseek-v4.1-flash', calls: '7285', dist: [['最大×7275', 'primary'], ['(默认)×10', '']], think: '~11.0M 字', out: '7.52M', dur: '17.1s' },
+  { model: 'zai-coding-cn/glm-5.3', calls: '20.1k', dist: [['(默认)×63', ''], ['最大×20.1k', 'primary'], ['关闭×1', '']], think: '~30.9M 字', out: '17.6M', dur: '18.9s', err: 1 },
+  { model: 'deepseek-official/deepseek-flash', calls: '19.6k', dist: [['(默认)×40', ''], ['最大×19.6k', 'primary'], ['关闭×2', '']], think: '9.26M tok', out: '20.7M', dur: '13.8s', err: 0 },
+  { model: 'zai-coding-cn/glm-5.3-flash', calls: '10.8k', dist: [['最大×10.8k', 'primary'], ['(默认)×4', '']], think: '~23.8M 字', out: '11.6M', dur: '27.4s', err: 1 },
+  { model: 'command-code/deepseek/deepseek-v4.1-flash', calls: '7285', dist: [['最大×7275', 'primary'], ['(默认)×10', '']], think: '~11.0M 字', out: '7.52M', dur: '17.1s', err: 2 },
 ]
 
 const statsTable = `
@@ -110,19 +110,17 @@ const statsTable = `
         <th class="rl-th rl-col-num">思考</th>
         <th class="rl-th rl-col-num">输出</th>
         <th class="rl-th rl-col-num">平均耗时</th>
-        <th class="rl-th rl-col-num">错误率%</th>
       </tr>
     </thead>
     <tbody>
       ${statRows.map((r) => `
       <tr>
         <td class="rl-td rl-cell-key">${r.model}</td>
-        <td class="rl-td rl-col-num">${r.calls}</td>
+        <td class="rl-td rl-col-num">${r.calls}${r.err > 0 ? `<span class="rl-err-badge" title="错误率%: ${r.err}"> ⚠${r.err}%</span>` : ''}</td>
         <td class="rl-td"><div class="rl-chips">${r.dist.map(([l, v]) => chip(l, v)).join('')}</div></td>
         <td class="rl-td rl-col-num">${r.think}</td>
         <td class="rl-td rl-col-num">${r.out}</td>
         <td class="rl-td rl-col-num">${r.dur}</td>
-        <td class="rl-td rl-col-num">0</td>
       </tr>`).join('')}
     </tbody>
   </table>
