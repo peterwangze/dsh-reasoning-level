@@ -260,9 +260,20 @@ test('(blocked-4) 旧 lastProbe（无 blockedReasons）客户端渲染不崩：�
   const text = []
   collectText(statsTree, text)
   const all = text.join('|')
+  const titles = []
+  ;(function walkTitles(node) {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (typeof node.props?.title === 'string') titles.push(node.props.title)
+    for (const child of node.children ?? []) walkTitles(child)
+    walkTitles(node.props?.children)
+  })(statsTree)
   assert.ok(all.includes('demo/m1'), '探测结果表必须回显 lastProbe 模型')
   assert.ok(all.includes('未知原因'), '旧 lastProbe 无 blockedReasons → 该档按「未知原因」降级（不崩、不编造）')
-  assert.ok(all.includes('由 DeepSeek 官方适配器管理'), 'skipped:official-adapter 必须渲染新结论文案（PERSISTED_KEYS）')
+  // 2026-10-21 真机反馈：持久化列只显示短标签（「官方适配器」），完整结论挂 title——
+  // 断言两处都在，防止「为了排版把语义删掉」或「为了语义把列撑爆」两种退化。
+  assert.ok(all.includes('官方适配器'), 'skipped:official-adapter 短标签必须渲染')
+  assert.ok(!all.includes('由 DeepSeek 官方适配器管理'), '完整结论不得内联进单元格（会把每行撑成 8 行）')
+  assert.ok(titles.some((title) => title.includes('由 DeepSeek 官方适配器管理')), '完整结论必须保留在 title（PERSISTED_KEYS 语义不丢）')
   // 未知错误：原样显示 code: message，超长截断 120 字符 + 省略号（不硬塞进已知分类）
   assert.ok(all.includes('WEIRD_CODE: '), '未知错误必须原样显示 code/message')
   assert.ok(!all.includes('x'.repeat(130)), '未知错误原文必须截断（120 字符上限）')

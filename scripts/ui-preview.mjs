@@ -40,27 +40,31 @@ const chip = (label, variant) => `<span class="rl-chip${variant ? ' rl-chip-' + 
 const chips = (list, variant) => list.map((l) => chip(l, variant)).join('')
 
 // ── 复刻「探测结果」表（数据取自真实 lastProbe 的三种典型形态）──────────────
+// 2026-10-21 真机反馈后：持久化列只放**短标签**，完整解释挂 title（长句会把每行撑成 8 行）。
 const probeRows = [
   {
     model: 'zai-coding-cn/glm-5.3-flash',
     working: ['关闭', '极低', '低', '中', '高', '极高', '最大'],
     rejected: [],
     blocked: '',
-    persisted: '已与实测一致',
+    short: '已一致',
+    long: '已与实测一致（无需改动）',
   },
   {
     model: 'command-code/deepseek/deepseek-v4.1-flash',
     working: ['关闭', '低', '中', '高', '极高', '最大'],
     rejected: ['极低'],
     blocked: '',
-    persisted: '已固化',
+    short: '已固化',
+    long: '已固化（探测收敛）',
   },
   {
     model: 'craze-code/gpt-6.1-sol',
     working: ['中', '高', '极高', '最大'],
     rejected: [],
     blocked: chip('关闭', 'warning') + chip('极低', 'warning') + chip('低', 'warning') + '<div class="rl-cell-sub">连接失败（网络/证书/DNS）——检查网络或代理</div>',
-    persisted: '已固化',
+    short: '已固化',
+    long: '已固化',
   },
 ]
 
@@ -81,7 +85,7 @@ const probeTable = `
         <td class="rl-td rl-cell-key">${r.model}</td>
         <td class="rl-td"><div class="rl-chips">${chips(r.working, 'success')}</div></td>
         <td class="rl-td rl-cell-error">${r.rejected.length ? `<div class="rl-chips">${chips(r.rejected, 'danger')}</div>` : ''}${r.blocked}</td>
-        <td class="rl-td rl-col-persisted">${r.persisted}</td>
+        <td class="rl-td rl-col-persisted" title="${r.long}">${r.short}</td>
       </tr>`).join('')}
     </tbody>
   </table>
@@ -156,7 +160,14 @@ const html = `<!doctype html>
     </div>
   </div>
   <div class="gap"></div>
-  <div class="rl-card"><h3 class="rl-card-title">实测探测</h3>${probeTable}</div>
+  <div class="rl-card"><h3 class="rl-card-title">探测结果（默认折叠，摘要行仍在）</h3>
+    <div class="rl-subtitle">实测探测</div>
+    <div class="rl-toolbar"><div class="rl-toolbar-main"><button class="rl-btn rl-btn-sm">导出 CSV</button></div><span class="rl-toolbar-meta">（15 个模型 · 实测用 1-token 请求）</span></div>
+    <div class="rl-status rl-status-ok">已载入上次探测结果（07:58:55 · 持久化回显）</div>
+    <details class="rl-disclosure rl-probe-disclosure"><summary class="rl-disclosure-summary">探测结果 · （15 个模型 · 实测用 1-token 请求）</summary></details>
+  </div>
+  <div class="gap"></div>
+  <div class="rl-card"><h3 class="rl-card-title">探测结果（展开后）</h3>${probeTable}</div>
   <div class="gap"></div>
   <div class="rl-card"><h3 class="rl-card-title">模型聚合</h3>${statsTable}</div>
 </div></div></body></html>`

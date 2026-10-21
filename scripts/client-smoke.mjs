@@ -360,7 +360,9 @@ if (rendered < 3) {
 
 // ── 2c. 027-F3/F4：StatsPanel 挂载从持久化 lastProbe 重建结果表 + 持久化列 ──
 // （fixture lastProbe 携带 demo/m1 {working:[high,max], persisted:no-change-…}；
-//  回显表必须出现该模型词条与「持久化」列结局文案；「从未探测」空态必须不出现）
+//  回显表必须出现该模型词条与「持久化」列结局短标签；「从未探测」空态必须不出现。
+//  2026-10-21 真机反馈后：单元格只放短标签（`已一致`），完整语义挂 title——
+//  这里同时断言「短标签在文本里」+「长文案在 title 里」，两者缺一即红。）
 if (statsPanelTree === null) {
   console.error('smoke: StatsPanel component was not exercised — cannot assert lastProbe restore (027-F3)')
   process.exit(1)
@@ -368,8 +370,23 @@ if (statsPanelTree === null) {
 const statsText = []
 collectText(statsPanelTree, statsText)
 const statsTextAll = statsText.join('|')
-if (!statsTextAll.includes('demo/m1') || !statsTextAll.includes('持久化') || !statsTextAll.includes('已与实测一致')) {
-  console.error('smoke: StatsPanel must rebuild probe results from persisted lastProbe with persisted-outcome column (027-F3/F4)')
+if (!statsTextAll.includes('demo/m1') || !statsTextAll.includes('持久化') || !statsTextAll.includes('已一致')) {
+  console.error('smoke: StatsPanel must rebuild probe results from persisted lastProbe with a short persisted label (027-F3/F4) — text=' + statsTextAll.slice(0, 400))
+  process.exit(1)
+}
+const persistedTitles = []
+;(function collectTitles(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (typeof node.props?.title === 'string') persistedTitles.push(node.props.title)
+  for (const child of node.children ?? []) collectTitles(child)
+  collectTitles(node.props?.children)
+})(statsPanelTree)
+if (!persistedTitles.some((title) => title.includes('已与实测一致'))) {
+  console.error('smoke: persisted short label must carry the full explanation in title (long sentence must not widen the column)')
+  process.exit(1)
+}
+if (statsTextAll.includes('已与实测一致')) {
+  console.error('smoke: persisted long explanation must NOT be inline in the cell (it stretches each row to 8 lines)')
   process.exit(1)
 }
 if (statsTextAll.includes('尚未探测过')) {
@@ -381,8 +398,17 @@ if (statsTextAll.includes('尚未探测过')) {
 // （fixture demo/m2：blocked=['max'] + blockedReasons.max=429 → 「限流或额度不足」；
 //  persisted=skipped:official-adapter → PERSISTED_KEYS 新语义文案，不得显示旧
 //  「不在 llm-pi-ai 配置」）
-if (!statsTextAll.includes('限流或额度不足') || !statsTextAll.includes('由 DeepSeek 官方适配器管理')) {
-  console.error('smoke: probe results must render blocked attribution and official-adapter outcome (FEAT-004 ⑦) — got ' + statsTextAll)
+if (!statsTextAll.includes('限流或额度不足')) {
+  console.error('smoke: probe results must render blocked attribution (FEAT-004 ⑦) — got ' + statsTextAll)
+  process.exit(1)
+}
+// 官方适配器结局：单元格只显示短标签「官方适配器」，完整解释在 title 里
+if (!statsTextAll.includes('官方适配器')) {
+  console.error('smoke: probe results must render the official-adapter short label (FEAT-004 ⑦) — got ' + statsTextAll)
+  process.exit(1)
+}
+if (!persistedTitles.some((title) => title.includes('由 DeepSeek 官方适配器管理'))) {
+  console.error('smoke: official-adapter outcome must keep its full explanation in title')
   process.exit(1)
 }
 if (statsTextAll.includes('不在 llm-pi-ai 配置——仅展示')) {
@@ -700,10 +726,24 @@ const copyProbe = {
   ],
 }
 const copyStats = { since: Date.now(), totalCalls: 0, models: {}, recent: [], blacklist: {}, lastProbe: { t: 1, models: {} } }
-const copyText = flattenText(renderStats({ ...pausedStats[2], stats: copyStats, probe: copyProbe, piAiProviders: ['demo'] }))
-if (!copyText.includes('在 llm-pi-ai 的 demo 下没有这个模型')
-  || !copyText.includes('该模型由其他适配器提供')) {
+const copyTree = renderStats({ ...pausedStats[2], stats: copyStats, probe: copyProbe, piAiProviders: ['demo'] })
+const copyText = flattenText(copyTree)
+const copyTitles = []
+;(function collectCopyTitles(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return
+  if (typeof node.props?.title === 'string') copyTitles.push(node.props.title)
+  for (const child of node.children ?? []) collectCopyTitles(child)
+  collectCopyTitles(node.props?.children)
+})(copyTree)
+if (!copyText.includes('模型未列')
+  || !copyText.includes('其他适配器')) {
   console.error('smoke: skipped:not-in-pi-ai-config must split into configured-provider vs other-adapter copy (FEAT-004 §10.1) — got ' + copyText)
+  process.exit(1)
+}
+// 短标签只是「铺得下」，完整语义必须在 title 里——否则用户永远读不到「该怎么处理」
+if (!copyTitles.some((title) => title.includes('在 llm-pi-ai 的 demo 下没有这个模型'))
+  || !copyTitles.some((title) => title.includes('该模型由其他适配器提供'))) {
+  console.error('smoke: persisted short labels must carry the actionable explanation in title (FEAT-004 §10.1) — got ' + JSON.stringify(copyTitles))
   process.exit(1)
 }
 if (copyText.includes('仅展示，未写入')) {
