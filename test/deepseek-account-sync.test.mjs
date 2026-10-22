@@ -69,7 +69,9 @@ test('(account-3) 账号适配器未安装（设置节 undefined）→ 不写、
   await mount(ctx)
   assert.equal(accountWrites(state).length, 0, '未安装的适配器不得被写入')
   const applied = state.nsConfig.applied ?? {}
-  assert.equal(applied.deepseekAccount, undefined, '未持有所有权时不得落台账')
+  // P3-10（REVIEW-REL-012-R0/R1）：断言「没有记下所有权」而非「键必须缺失」——
+  // 生产 schema 会把缺席的嵌套 object 物化成 `{}`，写死 `=== undefined` 在真机上不成立。
+  assert.equal((applied.deepseekAccount ?? {}).level, undefined, '未持有所有权时不得落 level')
 })
 
 test('(account-4) 全局档不被该适配器支持（xhigh）→ 还原介入前原值', async () => {

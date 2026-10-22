@@ -82,6 +82,15 @@ export function makeCtx(options = {}) {
   const piAiSection = clone(options.piAiSection)
   // MAINT-041：DeepSeek 系两条独立适配器路由各有自己的设置节（llm-deepseek /
   // llm-deepseek-account）。默认 undefined = 该适配器未安装（插件必须跳过、不写）。
+  //
+  // ⚠ 桩与生产的形状差异（REVIEW-REL-012-R0 P1 的漏网原因，务必知情）：
+  // 真实宿主经 schemastery 解析后，`applied` 里**缺席的嵌套 object 会被物化成 `{}`**
+  // （`Config['~standard'].validate(旧配置)` → `applied.deepseekAccount === {}`）。
+  // 本桩不会自动物化——`applied` 只有被插件真正写过才出现对应键。
+  // 于是：
+  //   · 依赖「台账缺席 vs 存在」语义的用例，必须**显式**把生产形状喂进
+  //     `nsConfig.applied`（见 deepseek-account-sync 的 account-7/8/9）；
+  //   · 不要把桩改成自动物化——大量既有用例建立在「applied 缺席」的前提上。
   const deepseekSection = clone(options.deepseekSection)
   const deepseekAccountSection = clone(options.deepseekAccountSection)
   const state = {
