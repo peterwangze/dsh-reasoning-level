@@ -80,9 +80,15 @@ export const RL_DEFAULTS = Object.freeze({
 export function makeCtx(options = {}) {
   const nsConfig = clone(options.nsConfig ?? { enabled: false, statsPublic: true })
   const piAiSection = clone(options.piAiSection)
+  // MAINT-041：DeepSeek 系两条独立适配器路由各有自己的设置节（llm-deepseek /
+  // llm-deepseek-account）。默认 undefined = 该适配器未安装（插件必须跳过、不写）。
+  const deepseekSection = clone(options.deepseekSection)
+  const deepseekAccountSection = clone(options.deepseekAccountSection)
   const state = {
     nsConfig,            // llm-reasoning user 层（replace 写入时同步更新）
     piAiSection,         // llm-pi-ai user 层（replace 时同步更新，供 validatingStream 读取当前声明）
+    deepseekSection,     // llm-deepseek user 层（mutate set/unset reasoningEffort 时同步更新）
+    deepseekAccountSection, // llm-deepseek-account user 层（同上）
     routes: new Map(),   // path -> handler
     routeRegistrations: [], // 每次 webServer.register 调用记录 path（双注册判别观察面）
     schemas: new Map(),  // ns -> registered schema（历史面记录，0.2.0 起插件不再调用）
@@ -95,7 +101,7 @@ export function makeCtx(options = {}) {
     events: [],          // 'replace:<ns>' / 'mutate:<ns>' 顺序记录（F2 断言）
     handlers: new Map(), // event -> callback（测试驱动钩子路径用）
   }
-  const revisions = new Map([['llm-pi-ai', 0], ['llm-reasoning', 0], ['llm-deepseek', 0], ['agent-default-model', 0]])
+  const revisions = new Map([['llm-pi-ai', 0], ['llm-reasoning', 0], ['llm-deepseek', 0], ['llm-deepseek-account', 0], ['agent-default-model', 0]])
   const bump = (ns) => revisions.set(ns, (revisions.get(ns) ?? 0) + 1)
   // 内存版 SettingsForms 桩（0.2.0-rc.2 形状）：
   //  · describe() → 描述符数组（value 投影 / user 覆盖层 / revision 计数）
@@ -111,8 +117,9 @@ export function makeCtx(options = {}) {
       state.describeCalls += 1
       return [
         { ns: 'llm-pi-ai', user: clone(state.piAiSection), value: state.piAiSection === undefined ? {} : clone(state.piAiSection), revision: revisions.get('llm-pi-ai') },
-        { ns: 'llm-reasoning', user: clone(nsConfig), value: { ...RL_DEFAULTS, ...nsConfig }, revision: revisions.get('llm-reasoning') },
-        { ns: 'llm-deepseek', user: undefined, value: undefined, revision: revisions.get('llm-deepseek') },
+        { ns: 'llm-reasoning', user: clone(state.nsConfig), value: { ...RL_DEFAULTS, ...state.nsConfig }, revision: revisions.get('llm-reasoning') },
+        { ns: 'llm-deepseek', user: clone(state.deepseekSection), value: state.deepseekSection === undefined ? undefined : clone(state.deepseekSection), revision: revisions.get('llm-deepseek') },
+        { ns: 'llm-deepseek-account', user: clone(state.deepseekAccountSection), value: state.deepseekAccountSection === undefined ? undefined : clone(state.deepseekAccountSection), revision: revisions.get('llm-deepseek-account') },
         { ns: 'agent-default-model', user: undefined, value: undefined, revision: revisions.get('agent-default-model') },
       ]
     },
@@ -126,6 +133,25 @@ export function makeCtx(options = {}) {
       state.mutateCalls.push({ ns, ops })
       state.events.push('mutate:' + ns)
       bump(ns)
+      // MAINT-041：DeepSeek 系设置节的 reasoningEffort 写要反映到 state，后续 describe
+      // 才读得到最新值（插件的幂等判定 `section.reasoningEffort !== level` 依赖它）。
+      const target = ns === 'llm-deepseek' ? 'deepseekSection' : (ns === 'llm-deepseek-account' ? 'deepseekAccountSection' : undefined)
+      if (target !== undefined && state[target] !== undefined && Array.isArray(ops)) {
+        for (const op of ops) {
+          if (op === null || typeof op !== 'object' || !Array.isArray(op.path) || op.path.length !== 1 || op.path[0] !== 'reasoningEffort') continue
+          if (op.op === 'set') state[target] = { ...state[target], reasoningEffort: op.value }
+          else if (op.op === 'unset') { const next = { ...state[target] }; delete next.reasoningEffort; state[target] = next }
+        }
+      }
+      // 所有权台账（applied）写也要落到 nsConfig：插件的台账是 read-modify-write，
+      // 若桩只记调用不回写，第二次写永远从 {} 起步（删除分支恒 changed=false），
+      // 「还原后清除所有权」这类语义就测不出来。
+      if (ns === 'llm-reasoning' && Array.isArray(ops)) {
+        for (const op of ops) {
+          if (op === null || typeof op !== 'object' || !Array.isArray(op.path) || op.path.length !== 1 || op.path[0] !== 'applied') continue
+          if (op.op === 'set') state.nsConfig = { ...state.nsConfig, applied: clone(op.value) }
+        }
+      }
       return Promise.resolve()
     },
     replace(ns, value) {
