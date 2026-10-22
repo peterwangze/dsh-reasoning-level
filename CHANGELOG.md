@@ -17,7 +17,7 @@
 - **PATCH 口径**：仅修复缺陷，不改变行为契约——7 条写路径调用形状、宿主导出契约（`hostApiFace` / `HOST_REMOTE_CONTRACT`）、配置字段语义均未变更；新增字段与兜底都可被旧客户端忽略。
 - **升级**：`dsh plugin update`（或重装）+ 重启 DSH，无需卸载、无数据迁移。
 - **提示**：改完等级后若输入区控件仍显示旧值，重新选一次模型（宿主会把路由默认物化为会话显式等级），或直接重启（适配器 config 在加载时读取）。
-- 质量依据：全量回归 **143/143**（新增 `test/deepseek-account-sync.test.mjs` 11 条判别用例：路由级 6 + 模型级 5）、`client-smoke` exit 0、`host:doctor` 双树 **11/11 PASS**；关键断言做过变异验证（去掉兜底 → model-1/2 红；台账改回非串行 → account-2 红）；用户重启真机验收「已经生效」。
+- 质量依据：全量回归 **146/146**（新增 `test/deepseek-account-sync.test.mjs` **14 条**判别用例：路由级 6 + 模型级 5 + 台账物化形状 3）、`client-smoke` exit 0、`host:doctor` 双树 **11/11 PASS**；其中 4 组做过变异验证（去掉 supportedEfforts 兜底 → model-1/2 红；台账改回非串行 → account-2 红；删 level 判据 → account-7 红；original 回退会话快照 → account-8 红），其余用例为形状/门控断言、未逐条做变异；用户重启真机验收「已经生效」。
 ## 0.9.0 (2026-10-21)
 
 ### Added
