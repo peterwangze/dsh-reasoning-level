@@ -183,3 +183,45 @@ test('(model-5) 适配器真实上报了更宽的档位 → 以真实上报为�
   }, 'deepseek-account', 'x')
   assert.equal(cfg.reasoningEffort, 'ultra')
 })
+
+// ── 生产 schema 物化形状（REVIEW-REL-012-R0 P1）───────────────────────────────
+// schemastery 会把**缺席的嵌套 object 字段物化成 `{}`**。旧 readAppliedDeepseek
+// 只看「是不是对象」→ 永远判成「台账已存在」→ ledger.original 恒 undefined →
+// 被 dsh-settings 的 cloneJsonShaped 剥掉 → original 从来没落过盘（真机 profile
+// 实证：两条路由都只有 level）。以下三条用例锁死修正后的语义。
+test('(account-7) 台账被物化成 {} 时，首写仍能捕获 original（不得写 undefined）', async () => {
+  const { ctx, state } = makeCtx({
+    // 宿主把缺失的嵌套对象物化成 {} —— 这正是生产 describe 读到的形状
+    nsConfig: { enabled: true, level: 'max', applied: { routes: {}, deepseek: {}, deepseekAccount: {} }, statsPublic: true },
+    deepseekAccountSection: { reasoningEffort: 'high' },
+  })
+  await mount(ctx)
+  const applied = state.nsConfig.applied ?? {}
+  assert.deepEqual(applied.deepseekAccount, { level: 'max', original: 'high' }, '物化空对象必须视同缺席，original 要真的记下来')
+  assert.ok(Object.prototype.hasOwnProperty.call(applied.deepseekAccount, 'original'), 'original 键必须存在（null 也是值，undefined 会被序列化剥掉）')
+})
+
+test('(account-8) 升级用户台账缺 original（历史写入被剥）→ 还原走 unset，不写回我们自己的值', async () => {
+  const { ctx, state } = makeCtx({
+    // 历史 v0.9.0 写入后 original 丢失；当前 section 已是插件写的 max
+    nsConfig: { enabled: true, level: 'max', applied: { routes: {}, deepseek: { level: 'max' } }, statsPublic: true },
+    deepseekSection: { reasoningEffort: 'max' },
+  })
+  await mount(ctx)
+  state.nsConfig.enabled = false
+  const onUpdate = state.handlers.get('settings/document-updated')
+  onUpdate('llm-reasoning')
+  await settle()
+  const write = lastEffortWrite(officialWrites(state))
+  assert.deepEqual(write, { op: 'unset', path: ['reasoningEffort'] }, '缺 original 时必须 unset（回落适配器默认），不能把 max 再写一遍假装还原')
+})
+
+test('(account-9) 生产 Config 确认物化行为（防止未来引擎变更悄悄改变判据）', async () => {
+  const { loadPlugin } = await import('./harness.mjs')
+  const prod = (await loadPlugin()).Config
+  assert.ok(prod, 'Config schema must be exported')
+  const parsed = prod({})
+  const applied = typeof parsed.applied?.get === 'function' ? parsed.applied.get() : parsed.applied
+  const normalized = JSON.parse(JSON.stringify(applied ?? {}))
+  assert.deepEqual(normalized.deepseekAccount ?? {}, {}, 'schemastery 会把缺席的 applied.deepseekAccount 物化成 {}（本用例记录事实）')
+})

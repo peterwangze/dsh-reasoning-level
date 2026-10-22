@@ -5,7 +5,7 @@
 ### Fixed
 - **账号版 DeepSeek 适配器的默认等级完全不生效（MAINT-041）**：用户报障「全局默认设 max，`DeepSeek-V4.1-Flash` 仍显示 High」。根因：`deepseek-account` 路由由 `@deepseek-ai/dsh-llm-deepseek-account` 注册（设置 ns = entry id `llm-deepseek-account`，出厂 `reasoningEffort: high`），**不在 `llm-pi-ai.providers` 里**；插件此前只同步 `llm-deepseek`（API Key 版），账号版一次都没写过，等级永远停在适配器默认值。现在两条 DeepSeek 适配器路由表化，各自独立同步与持有所有权台账；适配器未安装（设置节不存在）时不写、不落台账。
 - **模型级默认对这两条路由静默失效（MAINT-041）**：`agent/request` 注入要求「已知该模型支持的档位」，而该信息只来自 `resolveModelInfo`，拿不到就放弃注入。现按**文档化契约**兜底为 `off/low/high/max`（official 版为代码常量 `OFF/LOW/HIGH/MAX_REASONING_EFFORT`，account 版 README 明写「每个模型都提供 off、low、high、max」），且仅在该适配器确实安装时兜底；真实上报更宽的档位时以真实上报为准。
-- **所有权台账写入竞态（MAINT-041）**：`applied` 台账是非串行 read-modify-write，两条路由紧邻写入时都读到同一份旧缓存、后写覆盖先写，导致 API Key 版的「原始值」丢失、关闭插件无法还原。改为 promise 链串行，并在写落定后再失效 describe 缓存。
+- **所有权台账的 `original` 从未落盘（REVIEW-REL-012-R0 P1）**：schemastery 会把**缺席的嵌套 object 字段物化成 `{}`**，旧判据只看「是不是对象」→ 永远判成「台账已存在」→ `original` 恒为 `undefined` → 被 `dsh-settings` 的 `cloneJsonShaped` 剥掉。真机 profile 实证：`applied.deepseek` 与 `applied.deepseekAccount` 都只有 `level`、没有 `original`——于是「关闭插件还原用户原值」实际一直没生效（只能 unset 回落适配器默认）。现以「有 `level` 才算持有所有权」为判据（空对象视同缺席），且原值在写之前捕获、绝不写 `undefined`；升级用户台账缺 `original` 时走 `unset`（不把插件自己写的值当成用户原值再写一遍）。- **所有权台账写入竞态（MAINT-041）**：`applied` 台账是非串行 read-modify-write，两条路由紧邻写入时都读到同一份旧缓存、后写覆盖先写，导致 API Key 版的「原始值」丢失、关闭插件无法还原。改为 promise 链串行，并在写落定后再失效 describe 缓存。
 - **探测归因误报（MAINT-041）**：`deepseek-account` 的模型在探测结果里被显示成「由其他适配器提供」，让人误以为是第三方插件；现在归 `官方适配器`（provider → 设置命名空间映射表）。
 
 ### Changed
