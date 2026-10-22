@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.1 (2026-10-22)
+
+### Fixed
+- **账号版 DeepSeek 适配器的默认等级完全不生效（MAINT-041）**：用户报障「全局默认设 max，`DeepSeek-V4.1-Flash` 仍显示 High」。根因：`deepseek-account` 路由由 `@deepseek-ai/dsh-llm-deepseek-account` 注册（设置 ns = entry id `llm-deepseek-account`，出厂 `reasoningEffort: high`），**不在 `llm-pi-ai.providers` 里**；插件此前只同步 `llm-deepseek`（API Key 版），账号版一次都没写过，等级永远停在适配器默认值。现在两条 DeepSeek 适配器路由表化，各自独立同步与持有所有权台账；适配器未安装（设置节不存在）时不写、不落台账。
+- **模型级默认对这两条路由静默失效（MAINT-041）**：`agent/request` 注入要求「已知该模型支持的档位」，而该信息只来自 `resolveModelInfo`，拿不到就放弃注入。现按**文档化契约**兜底为 `off/low/high/max`（official 版为代码常量 `OFF/LOW/HIGH/MAX_REASONING_EFFORT`，account 版 README 明写「每个模型都提供 off、low、high、max」），且仅在该适配器确实安装时兜底；真实上报更宽的档位时以真实上报为准。
+- **所有权台账写入竞态（MAINT-041）**：`applied` 台账是非串行 read-modify-write，两条路由紧邻写入时都读到同一份旧缓存、后写覆盖先写，导致 API Key 版的「原始值」丢失、关闭插件无法还原。改为 promise 链串行，并在写落定后再失效 describe 缓存。
+- **探测归因误报（MAINT-041）**：`deepseek-account` 的模型在探测结果里被显示成「由其他适配器提供」，让人误以为是第三方插件；现在归 `官方适配器`（provider → 设置命名空间映射表）。
+
+### Changed
+- `HOST_NAMESPACES` 新增 `deepseekAccount: 'llm-deepseek-account'`（含宿主出处台账），客户端镜像段同步更新（单源一致性测试锚定）。
+- `applied` 配置新增可选槽 `deepseekAccount`（形状同 `deepseek`）。**缺席 = 未持有所有权**，旧配置零迁移。
+- 测试桩补齐 `deepseekSection` / `deepseekAccountSection` 两个设置节与写回显，并修正 describe 读闭包常量导致外部改动不可见的问题（该缺陷本身会掩盖回归）。
+
+### Notes
+- **PATCH 口径**：仅修复缺陷，不改变行为契约——7 条写路径调用形状、宿主导出契约（`hostApiFace` / `HOST_REMOTE_CONTRACT`）、配置字段语义均未变更；新增字段与兜底都可被旧客户端忽略。
+- **升级**：`dsh plugin update`（或重装）+ 重启 DSH，无需卸载、无数据迁移。
+- **提示**：改完等级后若输入区控件仍显示旧值，重新选一次模型（宿主会把路由默认物化为会话显式等级），或直接重启（适配器 config 在加载时读取）。
+- 质量依据：全量回归 **143/143**（新增 `test/deepseek-account-sync.test.mjs` 11 条判别用例：路由级 6 + 模型级 5）、`client-smoke` exit 0、`host:doctor` 双树 **11/11 PASS**；关键断言做过变异验证（去掉兜底 → model-1/2 红；台账改回非串行 → account-2 红）；用户重启真机验收「已经生效」。
 ## 0.9.0 (2026-10-21)
 
 ### Added
