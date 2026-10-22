@@ -124,3 +124,62 @@ test('(account-6) 探测结局：账号版路由归 official-adapter，不误报
     '账号版适配器管辖的模型应归 official-adapter（修复前是 not-in-pi-ai-config）',
   )
 })
+
+// ── 模型级默认（MAINT-041 第二面）─────────────────────────────────────────────
+// 「全局默认」靠路由 config 同步；「模型级默认」靠 agent/request 注入，而注入要求
+// supportedEfforts 非空。两条 DeepSeek 适配器的档位集合是**文档化**的
+// （official 常量 OFF/LOW/HIGH/MAX；account README「每个模型都提供 off、low、high、max」），
+// 因此 resolveModelInfo 给不出东西时必须按契约兜底，否则模型级默认对这两条路由静默失效。
+// 五个用例锁定兜底的边界：生效 / 两条路由各自生效 / 词表外的档不注入 /
+// 适配器未安装不臆造 / 真实上报更宽时以真实上报为准。
+async function injectFor(options, provider, model) {
+  const { ctx, state } = makeCtx(options)
+  await mount(ctx)
+  const onRequest = state.handlers.get('agent/request')
+  assert.ok(onRequest !== undefined, 'agent/request handler must be registered')
+  return onRequest({}, async () => ({ provider, model, maxTokens: 1 }))
+}
+
+test('(model-1) 账号版路由：模型级默认在 resolveModelInfo 无能力时仍注入', async () => {
+  const cfg = await injectFor({
+    nsConfig: { enabled: true, level: 'high', models: { 'deepseek-account/deepseek-v4-pro': 'max' }, statsPublic: true },
+    deepseekAccountSection: { reasoningEffort: 'high' },
+    resolveModelInfo: async () => undefined,
+  }, 'deepseek-account', 'deepseek-v4-pro')
+  assert.equal(cfg.reasoningEffort, 'max')
+})
+
+test('(model-2) API Key 版路由：同一兜底同样生效', async () => {
+  const cfg = await injectFor({
+    nsConfig: { enabled: true, level: 'high', models: { 'deepseek-official/deepseek-flash': 'low' }, statsPublic: true },
+    deepseekSection: { reasoningEffort: 'high' },
+    resolveModelInfo: async () => undefined,
+  }, 'deepseek-official', 'deepseek-flash')
+  assert.equal(cfg.reasoningEffort, 'low')
+})
+
+test('(model-3) 兜底只给文档化的 off/low/high/max：词表外的档不注入', async () => {
+  const cfg = await injectFor({
+    nsConfig: { enabled: true, level: 'high', models: { 'deepseek-account/deepseek-v4-pro': 'xhigh' }, statsPublic: true },
+    deepseekAccountSection: { reasoningEffort: 'high' },
+    resolveModelInfo: async () => undefined,
+  }, 'deepseek-account', 'deepseek-v4-pro')
+  assert.equal(cfg.reasoningEffort, undefined, 'DeepSeek 不认 xhigh，不得注入')
+})
+
+test('(model-4) 适配器未安装（设置节 undefined）→ 不臆造能力、不注入', async () => {
+  const cfg = await injectFor({
+    nsConfig: { enabled: true, level: 'high', models: { 'deepseek-account/deepseek-v4-pro': 'max' }, statsPublic: true },
+    resolveModelInfo: async () => undefined,
+  }, 'deepseek-account', 'deepseek-v4-pro')
+  assert.equal(cfg.reasoningEffort, undefined)
+})
+
+test('(model-5) 适配器真实上报了更宽的档位 → 以真实上报为准（兜底不覆盖）', async () => {
+  const cfg = await injectFor({
+    nsConfig: { enabled: true, level: 'high', models: { 'deepseek-account/x': 'ultra' }, statsPublic: true },
+    deepseekAccountSection: { reasoningEffort: 'high' },
+    resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low' }, { id: 'ultra' }] } }),
+  }, 'deepseek-account', 'x')
+  assert.equal(cfg.reasoningEffort, 'ultra')
+})
