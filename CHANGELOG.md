@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.2 (2026-11-07)
+
+### Fixed
+- **DSH 0.2.2 升级后推理等级失效且可能中断会话（MAINT-042）**：0.2.2 的 `dsh-agent-loop` 在步骤准备后对 `agent/request` 加了等值守卫——插件旧的「瀑布注入」路径改 `reasoningEffort` 会让**整步直接失败**；同时 0.2.2 会话的模型选择（`AgentModel.select()`）会覆盖适配器配置默认值，导致「全局默认等级已写进配置，但输入区仍显示 High」。修复：新增**原生选择执行面**——在 `agent/status(running)` 的合法窗口内（步骤准备前）同步调用 `agent.model.select()` 把全局默认（或模型级覆盖）落到会话选择上；root 会话首次出现/切换模型/目标档变化时对齐，同一路由后续**尊重你在模型选择器里的手动选择**，子 agent 只补缺省、绝不覆盖显式预设；经验黑名单（曾被网关拒绝的档位）同样不会被写入。旧宿主（0.2.1-rc.x，无 AgentModel）的注入路径逐字保留——能力探测只看真实方法是否存在，不猜宿主版本。
+- **启动竞态：`agent-default-model` 条目晚激活时全局同步被静默跳过（MAINT-042 附带）**：boot 重试原先只盯 `llm-pi-ai`；现在 `syncDefaultAgent` 开启时 `agent-default-model` 条目缺席也会重试（上限不变），且 settings 就绪后对已存在的会话补一次对齐（sweep）。
+
+### Changed
+- 宿主契约面（`lib/host-compat.js` 单源）新增 0.2.2 触点登记：事件 `agent/created` / `agent/status`、服务 `agents`、方法面 `HOST_AGENT_METHODS`，出处台账 S8 重写为双代判别、新增 S12 行。
+- 兼容性看护升级（FEAT-006）：`host:doctor` 扩为**十二触点**——探针 #6 改为「守卫锚/注入点锚」双代判别（未知代次直接 FAIL 而非假绿），新增探针 #12（`agent/status` 发射时机 + `model.select/current` 锚点 + 时序校验）；事件探针覆盖 `agent/status`。`dsh-client-ui-settings` / `dsh-client-locale` 增锁 devDeps，C6 探针从降级路径升级为真实解析。
+- 统计端点新增 `contractHealth.agentSelection`（`mode: native | legacy | unknown` + 最近目标档/错误）——宿主升级断接时在统计面第一时间可见。
+
+### Notes
+- **用户可见行为变化（REVIEW R0 F11）**：在 0.2.2 宿主上，首见对齐/切换模型对齐会向会话写入一条持久 `model/selection` 记录（宿主自有机制、幂等去重，与宿主模型选择器同通道）——会话历史里可见，属预期行为。
+- **兼容矩阵**：同时支持 0.2.1-rc.x 与 0.2.2-rc.x 宿主（双树测试互证；混装环境按逐宿主能力探测覆盖——机制上适用，未做混装直测）。
+- **升级**：`dsh plugin update`（或重装）+ 重启 DSH，无需卸载、无数据迁移。
+- 质量依据：双树全量回归 **338/338**（0.2.1-rc.2 锁版基线 + 0.2.2-rc.1 镜像树同套件）、`host:doctor` 双树 **12/12 PASS DRIFT=0**、`client-smoke` exit 0、`npm pack` 10 files、CI success（run 42339112134）、独立 Code Reviewer R0 APPROVED_WITH_NOTES（P1/P2 全闭环）、用户 0.2.2 真机验收通过（official/account 路由显示全局 Max）。
+
 ## 0.9.1 (2026-10-22)
 
 ### Fixed
