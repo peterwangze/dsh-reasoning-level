@@ -30,6 +30,7 @@
     "lib/index.js",
     "lib/client.js",
     "lib/host-compat.js",
+    "lib/agent-selection.js",
     "cordis.patch.yml",
     "install.ps1",
     "install.sh",
@@ -47,17 +48,19 @@
     "@deepseek-ai/schemastery": "*"
   },
   "devDependencies": {
-    "zod": "4.6.7",
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-agent-default-model": "0.2.1-rc.2",
     "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
     "@deepseek-ai/dsh-api-remotes": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.2.1-rc.2",
     "@deepseek-ai/dsh-host-webserver": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm-deepseek": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm-pi-ai": "0.2.1-rc.2",
     "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
     "@deepseek-ai/schemastery": "3.18.5",
-    "yaml": "2.9.1"
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
   }
 }

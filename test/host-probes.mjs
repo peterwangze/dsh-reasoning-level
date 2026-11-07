@@ -655,9 +655,9 @@ function probeMirrorSingleSource() {
 }
 
 // ── 条目 10（C6）：dsh.client.inject 声明存在性（T 级）─────────────────────
-// 白名单基线（清理后三名，MAINT-029 commit 910baed）：A-2 实现期验证结论——
-// dsh-client-ui-settings / dsh-client-locale 未入 devDeps 锁（本任务授权面仅
-// agent-loop/llm/host-webserver 三包），基线按 §4.2 † 预写降级为白名单比对。
+// 白名单基线（清理后三名，MAINT-029 commit 910baed）。FEAT-006（2026-11-07）：
+// ui-settings / locale 已入 devDeps 锁（0.2.1-rc.2，与基线锁版策略一致）——
+// 基线分支从「白名单比对降级」升级为白名单 + 逐名真实解析（锁版树内死声明即 FAIL）。
 const INJECT_WHITELIST_BASELINE = ['@deepseek-ai/dsh-client-ui-settings', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-api-remotes']
 // T-F2 归因分叉依据：电池其余宿主树探针依赖的 co-tree 包清单——普遍不可解析
 // （全部缺席）⇒ 目标树是残树/布局漂移，而非死声明（BM-3 同款宽容归因）。
@@ -672,7 +672,14 @@ function probeClientInjectDeclaration(source) {
     if (actual.join('|') !== expected.join('|')) {
       return rawFail(`白名单比对失配：声明 [${actual.join(', ')}] vs 清理后三名基线 [${expected.join(', ')}]`, 'C6 死声明再引入（MAINT-029 同型）或名单漂移——arriveGraphRow 对未知名静默跳过（L265-268），宿主未来收紧严格校验即激活失败；同步更新白名单与 HOST_PROVENANCE C6')
     }
-    return RESULT_PASS(`白名单比对 === 清理后三名基线 [${expected.join(', ')}]（ui-settings/locale 未锁 devDep，按 §4.2 † 降级路径）`)
+    const missing = []
+    for (const declaredName of declared) {
+      if (resolvePackage(source, declaredName) === null) missing.push(declaredName)
+    }
+    if (missing.length > 0) {
+      return rawFail(`基线树内声明包不可解析：${missing.join(', ')}`, 'C6 声明未锁 devDeps（锁版基线树内必须可解析——FEAT-006 起判 FAIL）——处置：npm install --save-dev --legacy-peer-deps 补锁')
+    }
+    return RESULT_PASS(`白名单比对 === 清理后三名基线 [${expected.join(', ')}]；三名在锁版基线树全部可解析`)
   }
   const rows = []
   let failed = false
