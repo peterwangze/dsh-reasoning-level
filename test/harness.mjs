@@ -217,7 +217,10 @@ export function makeCtx(options = {}) {
     fiber: {}, // cordis fiber（configure(presentation, owner) 的 owner 参数面）
     logger: { warn() {}, info() {}, error() {} },
     get(key) {
-      return key === 'webServer' ? (webServerVisible ? activeWebServer : undefined) : undefined
+      if (key === 'webServer') return webServerVisible ? activeWebServer : undefined
+      // MAINT-042：可注入额外宿主服务（agents registry）——未提供时保持 undefined，
+      // 既有 0.2.1 路径用例（无 AgentModel）不受影响。
+      return options.services?.[key]
     },
     effect(fn) {
       return fn()

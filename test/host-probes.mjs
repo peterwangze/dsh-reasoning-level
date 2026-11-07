@@ -237,16 +237,19 @@ async function probeSettingsFace(source) {
   return RESULT_PASS([...evidence, '接缝走本地回退（settingsNamespace 导出缺席——0.2.0 常态唯一路径，宿主内部 parseSettingsNamespace 已移除）'].join(' | '))
 }
 
-// ── 条目 2（S6）：事件名 ×4（T 级锚串，值取 HOST_EVENTS）────────────────────
+// ── 条目 2（S6）：事件名 ×5（T 级锚串，值取 HOST_EVENTS）────────────────────
 // 锚串形态自带判别性包装：agent/request 用「尾引号+逗号」与 agent/request-error 区分
 // （后者是前者的超串——裸 includes 会在错误事件行假命中）。锚点出处 HOST_PROVENANCE S6 各行。
+// MAINT-042：+agent/status（dsh-agent-loop 两代都在：0.2.1-rc.2 L798 / 0.2.2-rc.1 L562）
+// ——status(running) 是原生 select 的合法窗口，事件改名 = 双路径同时失效，必须 T 级看护。
 const EVENT_ANCHORS = [
   { key: 'settingsUpdated', pkg: 'dsh-settings', wrap: (v) => `"${v}"` },
   { key: 'agentRequest', pkg: 'dsh-agent-loop', wrap: (v) => `"${v}",` },
   { key: 'agentRequestError', pkg: 'dsh-agent-loop', wrap: (v) => `"${v}"` },
+  { key: 'agentStatus', pkg: 'dsh-agent-loop', wrap: (v) => `"${v}"` },
   { key: 'llmStream', pkg: 'dsh-llm', wrap: (v) => `"${v}"` },
 ]
-// 锚点包的**去重**集合（4 锚 → 3 包）：全不可解析判定必须以包数为基。MAINT-031 项①
+// 锚点包的**去重**集合（5 锚 → 3 包）：全不可解析判定必须以包数为基。MAINT-031 项①
 // 修前比的是 EVENT_ANCHORS.length（4 锚）vs unresolvedPkgs（Set 去重 ≤3 包）——恒不可达，
 // 整树不可解析时落入 partial 分支文案「可解析包的锚点全部命中」误导排查方向。本集合
 // 由 EVENT_ANCHORS 派生（单一事实源）：改锚表即同步，不会二次漂移。
@@ -459,24 +462,92 @@ function probeLlmEffortValidation(source) {
   return RESULT_PASS(`dsh-llm@${pkg.version} ${rows.join(' ; ')}`)
 }
 
-// ── 条目 6（S8）：agent/request payload reasoningEffort 字段（T 级锚串）─────
-// 锚串出处：dsh-agent-loop lib/index.js payload schema（0.1.2-rc.1 L1056 / 0.1.5-rc.2
-// L1497 reasoningEffort: z.string().min(1)；注入点 0.1.5-rc.2 L1136-1140）。
-// S8 按 D6 显式豁免出契约常量表——锚串属探针自有知识，出处走 HOST_PROVENANCE S8 行。
-const AGENT_EFFORT_ANCHORS = ['reasoningEffort: z.string().min(1)', ': { reasoningEffort },']
+// ── 条目 6（S8）：agent/request effort 通道语义（T 级；MAINT-042 双代判别）────
+// 锚串出处：dsh-agent-loop lib/index.js。两代语义不同，判别器 = 守卫锚串在场与否：
+//  · legacy 代（≤0.2.1-rc.2）：瀑布消费 payload.reasoningEffort（注入点锚
+//    `: { reasoningEffort },`，0.1.5-rc.2 L1136-1140）——本插件 legacy 注入路径前提；
+//  · native 代（0.2.2-rc.1+）：preStep 固化选择后瀑布只做等值守卫（L1000-1001
+//    `use agent.model.select() before step preparation`），注入即 throw——本插件
+//    必须走 agent.model.select() 原生面（lib/agent-selection.js，MAINT-042）。
+// 公共锚 = payload schema 字段（两代都在：0.1.5-rc.2 L1497 / 0.2.2-rc.1 L1315）；
+// 守卫与注入点双缺席 = 未知代次（双路径适用性都无法证明）→ FAIL/DRIFT。
+const AGENT_EFFORT_ANCHORS = {
+  payloadField: 'reasoningEffort: z.string().min(1)',
+  legacyInjection: ': { reasoningEffort },',
+  nativeGuard: 'use agent.model.select() before step preparation',
+}
 
 function probeAgentRequestEffortField(source) {
   const pkg = requirePackage(source, 'dsh-agent-loop')
   if (pkg === null) return { status: 'SKIP', skip: 'UNRESOLVED', skipReason: 'dsh-agent-loop 在目标树不可解析（BM-3 树布局归因）' }
   const sources = libSources(pkg.dir)
-  const rows = []
-  let failed = false
-  for (const anchor of AGENT_EFFORT_ANCHORS) {
-    const hit = findAnchor(sources, anchor)
-    if (hit === null) { failed = true; rows.push(`✗"${anchor}"`) } else rows.push(`"${anchor}" → ${hit.relFile}:L${hit.line}`)
+  const field = findAnchor(sources, AGENT_EFFORT_ANCHORS.payloadField)
+  if (field === null) {
+    return rawFail(`dsh-agent-loop@${pkg.version} ✗"${AGENT_EFFORT_ANCHORS.payloadField}"`, 'S8 payload 字段漂移 = 任何代次下 effort 通道都不可用（致命类）——查 HOST_PROVENANCE S8')
   }
-  if (failed) return rawFail(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')}`, 'S8 字段漂移 = 注入被宿主忽略而统计照常（假象健康，静默类）——查 HOST_PROVENANCE S8（payload schema reasoningEffort 键）')
-  return RESULT_PASS(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')}`)
+  const rows = [`"${AGENT_EFFORT_ANCHORS.payloadField}" → ${field.relFile}:L${field.line}`]
+  const guard = findAnchor(sources, AGENT_EFFORT_ANCHORS.nativeGuard)
+  if (guard !== null) {
+    rows.push(`native 代（守卫 → ${guard.relFile}:L${guard.line}）`)
+    return RESULT_PASS(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')}——瀑布只校验不改写，插件必须走 agent.model.select() 原生面（MAINT-042）`)
+  }
+  const legacy = findAnchor(sources, AGENT_EFFORT_ANCHORS.legacyInjection)
+  if (legacy !== null) {
+    rows.push(`legacy 代（注入点 ": { reasoningEffort }," → ${legacy.relFile}:L${legacy.line}）`)
+    return RESULT_PASS(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')}——瀑布仍消费注入，legacy agent/request 路径有效`)
+  }
+  return rawFail(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')} ; ✗守卫锚与注入点锚均缺席`, 'S8 通道语义未知代次 = legacy 注入与 native select 双路径的适用性都无法证明——查 HOST_PROVENANCE S8/S12，人工复核目标版本变更')
+}
+
+// ── 条目 12（S12）：原生 effort 选择面（T 级；MAINT-042）────────────────────
+// 守护对象 = lib/agent-selection.js 依赖的三件事（锚点全在 dsh-agent-loop 内；
+// AgentModel 本体在 dsh-agent 包——非 devDeps 不可锚，由 HOST_PROVENANCE S12
+// 台账行人工实证 + 集成测试桩级守护）：
+//  ① agent/status 事件存在（两代都在：0.2.1-rc.2 L798 / 0.2.2-rc.1 L562）——
+//     status(running) 是 select 的合法窗口；
+//  ② native 代：applyConfiguredRoute 调 agent.model.select(selection)（L1390）
+//     + preStep 读 this.model.current()（L671）；
+//  ③ native 代时序：agent/status 发射行号早于 model.current() 捕获行号
+//     （同步 status 监听器合法 select 的前提；倒置 = status 路径失效 → drift）。
+const NATIVE_SELECTION_ANCHORS = {
+  statusEvent: '"agent/status"',
+  capture: 'this.model.current()',
+  select: 'agent.model.select(selection)',
+}
+
+function probeAgentNativeSelection(source) {
+  const pkg = requirePackage(source, 'dsh-agent-loop')
+  if (pkg === null) return { status: 'SKIP', skip: 'UNRESOLVED', skipReason: 'dsh-agent-loop 在目标树不可解析（BM-3 树布局归因）' }
+  const sources = libSources(pkg.dir)
+  const status = findAnchor(sources, NATIVE_SELECTION_ANCHORS.statusEvent)
+  if (status === null) {
+    return rawFail(`dsh-agent-loop@${pkg.version} ✗${NATIVE_SELECTION_ANCHORS.statusEvent}`, 'S12 agent/status 事件缺席 = status(running) select 窗口不存在（两代都该在）——MAINT-042 原生与 legacy 双路径同时失去触发时机')
+  }
+  const rows = [`${NATIVE_SELECTION_ANCHORS.statusEvent} → ${status.relFile}:L${status.line}`]
+  const native = findAnchor(sources, NATIVE_SELECTION_ANCHORS.select)
+  if (native === null) {
+    if (findAnchor(sources, AGENT_EFFORT_ANCHORS.legacyInjection) !== null) {
+      return RESULT_PASS(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')}——legacy 代（无 AgentModel 面），仅依赖 ①（事件锚）`)
+    }
+    return rawFail(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')} ; ✗"${NATIVE_SELECTION_ANCHORS.select}" 且注入点锚亦缺席`, 'S12 选择面缺席且 legacy 注入点也不在——两代形状都不匹配，人工复核（与条目 6 未知代次同源）')
+  }
+  rows.push(`"${NATIVE_SELECTION_ANCHORS.select}" → ${native.relFile}:L${native.line}`)
+  const capture = findAnchor(sources, NATIVE_SELECTION_ANCHORS.capture)
+  if (capture === null) {
+    return rawFail(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')} ; ✗"${NATIVE_SELECTION_ANCHORS.capture}"`, 'S12 preStep 选择捕获锚缺席——native 面形状与实证不符，人工复核 HOST_PROVENANCE S12')
+  }
+  rows.push(`"${NATIVE_SELECTION_ANCHORS.capture}" → ${capture.relFile}:L${capture.line}`)
+  // 时序校验是启发式绊线（DRIFT 级人工复核入口），非严格执行证明：仅当两锚
+  // 同文件时行号才可比——跨文件重构时显式说明校验失效（不静默放过），同文件
+  // 方法定义顺序重排可能假 FAIL，均交由 doctor 的 DRIFT 复核 SOP 处置。
+  if (capture.relFile !== status.relFile) {
+    rows.push(`时序校验失效（两锚跨文件：${status.relFile} vs ${capture.relFile}）——需人工确认 status 发射仍早于捕获`)
+    return RESULT_PASS(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')}——native 代锚点齐全（时序待人工复核）`)
+  }
+  if (capture.line < status.line) {
+    return rawFail(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')} ; 时序倒置（status L${status.line} 晚于捕获 L${capture.line}）`, 'S12 status(running) 晚于 model.current() 捕获 = 同步 select 窗口关闭——lib/agent-selection.js 的 status 路径失效，需改挂更早事件（agent/created 或 setup）')
+  }
+  return RESULT_PASS(`dsh-agent-loop@${pkg.version} ${rows.join(' ; ')}——native 代：status 发射早于选择捕获，select 窗口成立`)
 }
 
 // ── 条目 7（S1）：schemastery 使用面（B 级 import 探测）─────────────────────
@@ -669,20 +740,21 @@ async function probeFailLoud() {
   }
 }
 
-// ── 探针注册表（§4.2 十一条——顺序即条目号）────────────────────────────────
+// ── 探针注册表（§4.2 十二条——顺序即条目号）────────────────────────────────
 // requiresHostTree：条目 8/9/11 为自有工件探针（无源依赖，测试与 doctor 恒跑）。
 export const PROBES = [
   { id: 1, touchpoint: 'S2/S3 dsh-settings 导出面（0.2.0 SettingsForms）+ settingsNamespace 接缝（本地回退=常态）', level: 'B+T', requiresHostTree: true, run: probeSettingsFace },
-  { id: 2, touchpoint: 'S6 事件名 ×4（settings/document-updated · agent/request · agent/request-error · llm/stream）', level: 'T', requiresHostTree: true, run: probeEventNames },
+  { id: 2, touchpoint: 'S6 事件名 ×5（settings/document-updated · agent/request · agent/request-error · agent/status · llm/stream）', level: 'T', requiresHostTree: true, run: probeEventNames },
   { id: 3, touchpoint: 'S10 webServer.register({kind:"exact",path,handler})', level: 'T', requiresHostTree: true, run: probeWebServerRegister },
   { id: 4, touchpoint: 'C4 api-remotes 消费方法集 ⊆ 宿主方法集 + 元数表 === HOST_REMOTE_CONTRACT.methods', level: 'B', requiresHostTree: true, run: probeApiRemotesRpc },
   { id: 5, touchpoint: 'S9 dsh-llm resolveCallWithInfo effort 校验结构', level: 'T', requiresHostTree: true, run: probeLlmEffortValidation },
-  { id: 6, touchpoint: 'S8 agent/request payload reasoningEffort 字段', level: 'T', requiresHostTree: true, run: probeAgentRequestEffortField },
+  { id: 6, touchpoint: 'S8 agent/request effort 通道语义（payload 字段 + 守卫/注入点双代判别）', level: 'T', requiresHostTree: true, run: probeAgentRequestEffortField },
   { id: 7, touchpoint: 'S1 schemastery 默认导出 + 使用面', level: 'B', requiresHostTree: true, run: probeSchemastery },
   { id: 8, touchpoint: 'C1 客户端 bundle 形态（require 集 === [react] + 镜像标记段）', level: 'T', requiresHostTree: false, run: probeClientBundleForm },
   { id: 9, touchpoint: 'C2/C4 镜像单源一致性（client 镜像段 === HOST_REMOTE_CONTRACT）', level: 'B', requiresHostTree: false, run: probeMirrorSingleSource },
   { id: 10, touchpoint: 'C6 dsh.client.inject 声明存在性（白名单基线/活树解析）', level: 'T', requiresHostTree: true, run: probeClientInjectDeclaration },
   { id: 11, touchpoint: 'C3 适配层 fail-loud（命名空间剥离 → 结构化错误）', level: 'B', requiresHostTree: false, run: probeFailLoud },
+  { id: 12, touchpoint: 'S12 原生 effort 选择面（agent/status 时机 + model.select/current）', level: 'T', requiresHostTree: true, run: probeAgentNativeSelection },
 ]
 
 /**

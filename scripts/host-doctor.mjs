@@ -137,7 +137,7 @@ const source = grading === 'baseline'
 push(`分级：${grading === 'baseline' ? 'baseline——目标树即 devDeps 锁版基线，T 级失败 = FAIL（锁版不该漂）' : 'live——T 级失败 = DRIFT（BM-2 防误报，等待人工语义复核）'}`)
 push('')
 
-// ── 逐触点表（§4.2 十一条，探针与判别测试共用）────────────────────────────
+// ── 逐触点表（§4.2 十二条，探针与判别测试共用）──────────────────────────────
 // MAINT-030/F-3：baseline 分级的 fail-closed throw（包缺席/版本失配，探针模块
 // requirePackage 抛出）在此结构化承接——替代原始栈迹崩溃 exit 1。载荷自带
 // 版本失配值（已安装 vs devDeps 锁版）与处置命令提示（ci.yml 同款 npm ci）。

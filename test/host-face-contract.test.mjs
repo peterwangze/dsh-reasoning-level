@@ -19,7 +19,7 @@
  *   守卫对照：用真实描述符 + 逐字复制的 gateway 元数守卫驱动正反例——
  *           2 参写调用必被拒（负对照）、3 参含显式 undefined 必放行（正对照）。
  *
- * FEAT-002 泛化（设计 §4，DEC-018 ③④）：断言清单 §4.2 十一条探针化到
+ * FEAT-002 泛化（设计 §4，DEC-018 ③④）：断言清单 §4.2 十二条探针化到
  * test/host-probes.mjs（测试与 doctor 共用，判据零分叉），本文件是 node:test
  * 外壳。双工件源：
  *   工件源① baseline = 仓库 node_modules devDeps 精确锁版（含 0.1.2-rc.1 的
