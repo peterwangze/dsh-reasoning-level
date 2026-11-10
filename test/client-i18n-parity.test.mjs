@@ -97,6 +97,7 @@ test('(UX-004/i18n-4) 工作台新增文案 key 在 zh/en 两侧都存在', () =
     'effortFollowGlobal', 'defaultLevel', 'paramControlLabel', 'paramEffective', 'paramFollowGlobalAction', 'paramFollowHostAction',
     'inputFollowCatalog', 'inputCustomText', 'inputCustomImage', 'sourceEffective',
     'defaultsThinkingTitle', 'defaultsParamsTitle', 'overviewScope', 'unsetValue',
+    'probeAll', 'probeAllHint', 'testingNote', 'probeNote', 'probeDone',
     'overviewThinkingDist', 'overviewMultimodal', 'overviewParamOverrides', 'overviewContract',
     'contractHealth', 'agentSelection', 'registryTitle', 'registryParams', 'registryModalities',
     'endpointStatus', 'probeState', 'observabilityHint', 'fallbackNotice', 'closeDetail',

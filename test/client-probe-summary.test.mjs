@@ -172,7 +172,7 @@ test('(N2) probeAll 重跑成功时摘要恢复绿色 —  // TDD-GUARD-N2', asy
   const pageTree = pageTag(pageProps)
 
   // 第一轮：apply 失败 → 摘要红色（这是 N2 场景的前置）
-  const btn1 = findProbeButton(pageTree, '一键探测全部模型并固化配置')
+  const btn1 = findProbeButton(pageTree, '一键探测思考档位（写回模型能力声明）')
   assert.ok(btn1, 'probeAll button not found in PageHeader after load')
   btn1.props.onClick()
   await sleep(80)
@@ -184,7 +184,7 @@ test('(N2) probeAll 重跑成功时摘要恢复绿色 —  // TDD-GUARD-N2', asy
   assert.ok(summ1.props.className.includes('rl-status-bad'), '前置：失败轮摘要应为红色')
 
   // 第二轮：apply 成功 → 摘要应为绿色（N2 期望：probeAll 起始重置 probeSummaryOk）
-  const btn2 = findProbeButton(tree1, '一键探测全部模型并固化配置')
+  const btn2 = findProbeButton(tree1, '一键探测思考档位（写回模型能力声明）')
   assert.ok(btn2)
   btn2.props.onClick()
   await sleep(80)

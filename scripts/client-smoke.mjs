@@ -926,9 +926,21 @@ if (probeHeader === undefined) {
   process.exit(1)
 }
 const probeButton = collectButtons(probeHeader[1](probeHeader[2]))
-  .find((node) => flattenText(node) === '一键探测全部模型并固化配置')
+  .find((node) => flattenText(node) === '一键探测思考档位（写回模型能力声明）')
 if (probeButton === undefined) {
-  console.error('smoke: probe-all button must be rendered in PageHeader (R0-P2-1)')
+  console.error('smoke: probe-all button must be rendered in PageHeader with thinking-level scope (R3)')
+  process.exit(1)
+}
+const probeButtonText = flattenText(probeButton)
+if (!probeButtonText.includes('思考档位') || probeButtonText.includes('固化配置')) {
+  console.error('smoke: probe-all button must name thinking levels and must not claim config persistence — got ' + probeButtonText)
+  process.exit(1)
+}
+const probeDiagEntry = findComponent(probePage, 'DiagnosticsPanel')
+resetHooks('DiagnosticsPanel')
+const probeDiagText = probeDiagEntry === undefined ? '' : textOf(probeDiagEntry[1](probeDiagEntry[2]))
+if (!probeDiagText.includes('不修改采样参数')) {
+  console.error('smoke: testingNote must state that sampling parameters are not modified — got ' + probeDiagText.slice(0, 500))
   process.exit(1)
 }
 probeButton.props.onClick()
@@ -938,7 +950,8 @@ const probeSummaryText = textOf(probeDoneStats[1](probeDoneStats[2]))
 for (const expected of [
   '2 个由官方适配器管理（无需写入）',
   '1 个由其他适配器提供（无需写入）',
-  '1 个暂无可固化等级',
+  '1 个暂无可写回档位',
+  '采样参数、多模态与全局默认不受影响',
 ]) {
   if (!probeSummaryText.includes(expected)) {
     console.error('smoke: probeDone summary must count outcomes separately — missing "' + expected + '" in: ' + probeSummaryText)

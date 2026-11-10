@@ -204,7 +204,7 @@ export function normalizeInput(list) // 去重 + 强制 text + 仅注册模态
 
 ```text
 ┌ PageHeader：统一模型管理 · 状态行（X 个模型提供商 / Y 个模型 / Z 自定义）
-│  actions：全局开关 · 刷新 · 一键探测
+│  actions：全局开关 · 刷新 · 一键探测思考档位（写回能力声明）
 ├ 概览条：思考档位分布 · 多模态启用数 · 参数覆盖数 · 契约健康
 ├ Tabs：模型 | 默认与预设 | 观测 | 诊断
 │
@@ -229,7 +229,7 @@ export function normalizeInput(list) // 去重 + 强制 text + 仅注册模态
 │   统计概览 / 按模型聚合 / 最近调用 / 探测结果（折叠）/ CSV
 │
 └ 诊断
-    契约健康（contractHealth）/ agentSelection 模式 / 扩展注册表 / 探测与固化 / 端点状态
+    契约健康（contractHealth）/ agentSelection 模式 / 扩展注册表 / 探测与能力声明 / 端点状态
 ```
 
 交互约束：
@@ -245,6 +245,7 @@ export function normalizeInput(list) // 去重 + 强制 text + 仅注册模态
 - 术语（R2b，DEC-032）：可见文案统一「模型提供商」（en: model provider），不再出现「provider / 服务商 / 路由」；筛选为「全部模型提供商 / 模型提供商筛选」；概览摘要写 `15 个模型 · 7 个模型提供商`。
 - 文案（R2b，DEC-030/032）：控件名带维度；跟随必须写来源 + 当前生效值；徽章不出现裸「已覆盖/继承」，改为「思考 高」「图像 开」「温度 0.6」等维度摘要；参数行固定 `生效值 0.7（来源：模型覆盖/全局默认/宿主）`；默认视图标题为「全局默认思考强度」「全局默认采样参数（模型未覆盖时生效）」；筛选为「全部模型提供商 / 模型提供商筛选」，页面不再出现「路由」一词（诊断视图的宿主技术细节除外）。
 - 计数口径（R2b）：PageHeader / Overview / 列表 toolbar / 「已应用」文案均为**可见 base 模型数**（真实 15）；header 的路由位改为**可见 base 模型提供商数**（真实 7），不再显示 14；provider head 只显示「N 个模型」；filter 7 项；Overview 摘要写 `15 个模型 · 7 个模型提供商`。
+- 探测作用域（R3，DEC-033）：按钮主文案「一键探测思考档位（写回模型能力声明）」；只对每个模型发 1-token 请求实测思考档位，结束时只写回 `reasoningEfforts` 能力声明；**不写** temperature/topP/topK/maxTokens、多模态 input、全局默认与预设。完成提示与 `probeNote` 明示「仅思考档位」「采样参数、多模态与全局默认不受影响」；结果状态用「能力声明已固化 / 能力声明待固化」。
 - i18n：新增文案 zh/en 成对，`test/client-i18n-parity.test.mjs` 覆盖。
 - 写路径红线（RISK-005 同型）：既有 7 个写入口（enabled/level/syncDefaultAgent/models 增删改/purposes×2）全部保留并继续可写；新增入口（模型级思考、多模态、参数、预设）逐项有 client-smoke 结构断言。
 
@@ -268,7 +269,7 @@ export function normalizeInput(list) // 去重 + 强制 text + 仅注册模态
   - `test/model-info-endpoint.test.mjs`：路由/模型聚合、listModels 失败降级、缓存、回环门控。
   - 既有 338 用例零回归（双树）。
 - **UX-004**：
-  - `client-smoke`：四 tab 渲染；数字参数 draft → blur/Enter 一次写、Escape/非法值不写；R2b 7 提供商 × 15 模型隐藏 router 后 15 行/7 组、0 路由/服务商文案、页面含「模型提供商」、base 行 `writeKeys` 含隐藏 router key、行级来源 0 写/一次清三处、详情三维度写入（含「默认档位」「跟随宿主目录」「改为跟随宿主默认」动作文案）、undo；旧 7 入口保留；无 document 环境。
+  - `client-smoke`：四 tab 渲染；数字参数 draft → blur/Enter 一次写、Escape/非法值不写；R2b 7 提供商 × 15 模型隐藏 router 后 15 行/7 组、0 路由/服务商文案、页面含「模型提供商」、base 行 `writeKeys` 含隐藏 router key、行级来源 0 写/一次清三处、详情三维度写入（含「默认档位」「跟随宿主目录」「改为跟随宿主默认」动作文案）、undo；R3 探测按钮含「思考档位」且不含「固化配置」、`testingNote` 含「不修改采样参数」、完成提示含「仅思考档位 / 不受影响」；旧 7 入口保留；无 document 环境。
   - `client-i18n-parity`：新 key zh/en 等价。
   - `ui-preview`：工作台静态预览（至少模型视图与默认视图）无横向溢出。
 - **真机**：DSH 重启 → 设置 → 统一模型管理；逐项操作并截图；用户观感验收。
