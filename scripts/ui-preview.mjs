@@ -1,20 +1,17 @@
 /**
- * UI 预览（开发辅助，不参与 CI）——把 `lib/client.js` 里的 STYLESHEET 与表格结构
- * 渲染成静态 HTML，再用 Playwright 截图，用于**肉眼校验布局**。
+ * UI 预览（开发辅助，不参与 `node --test`）——把 `lib/client.js` 的 STYLESHEET 与
+ * UX-004 模型中心工作台的**真实列结构**固化成静态 HTML，再用 Playwright 截图，
+ * 用于肉眼校验布局（设置页需要登录态，client-smoke 只能证明结构不抛错）。
  *
- * 为什么需要它：client.js 只能内联/注入样式，宿主设置页又需要登录态，自动化测试
- * （client-smoke）只能证明「渲染不抛错」，无法证明「表格没被挤成一列 chips」。
- * 本脚本把真实样式表 + 真实列结构固化成可截图的静态页，改 CSS 后能立刻看到效果。
+ *   node scripts/ui-preview.mjs                  # 820px 面板（窄布局：详情展开行）
+ *   node scripts/ui-preview.mjs --width 1080     # 指定面板宽度（>1000 → 宽布局右侧详情）
  *
- *    node scripts/ui-preview.mjs                 # 输出 tmp/ui-preview.html + tmp/ui-preview.png
- *    node scripts/ui-preview.mjs --width 820     # 指定面板宽度（模拟设置页内容区）
- *
- * 依赖：Playwright（本机 dev_toolchain 的 node-with-playwright 包装器）；
- * 缺失时只产出 HTML 并提示，不失败。
+ * 产出：tmp/ui-preview*.html（始终）+ tmp/ui-preview*.png（Playwright 可用时）。
+ * 每个页面都执行横向溢出检查（scrollWidth ≤ clientWidth），溢出即 exit 1。
  *
  * @module dsh-reasoning-level/scripts/ui-preview
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -33,154 +30,302 @@ function extractStylesheet(text) {
 
 const widthArg = process.argv.indexOf('--width')
 const panelWidth = widthArg > 0 ? Number(process.argv[widthArg + 1]) : 820
-
 const stylesheet = extractStylesheet(source)
 
 const chip = (label, variant) => `<span class="rl-chip${variant ? ' rl-chip-' + variant : ''}">${label}</span>`
-const chips = (list, variant) => list.map((l) => chip(l, variant)).join('')
+const chips = (list, variant) => list.map((item) => chip(item, variant)).join('')
+const escaped = (value) => String(value).replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]))
 
-// ── 复刻「探测结果」表（数据取自真实 lastProbe 的三种典型形态）──────────────
-// 2026-10-21 真机反馈后：持久化列只放**短标签**，完整解释挂 title（长句会把每行撑成 8 行）。
-const probeRows = [
-  {
-    model: 'zai-coding-cn/glm-5.3-flash',
-    working: ['关闭', '极低', '低', '中', '高', '极高', '最大'],
-    rejected: [],
-    blocked: '',
-    short: '已一致',
-    long: '已与实测一致（无需改动）',
-  },
-  {
-    model: 'command-code/deepseek/deepseek-v4.1-flash',
-    working: ['关闭', '低', '中', '高', '极高', '最大'],
-    rejected: ['极低'],
-    blocked: '',
-    short: '已固化',
-    long: '已固化（探测收敛）',
-  },
-  {
-    model: 'craze-code/gpt-6.1-sol',
-    working: ['中', '高', '极高', '最大'],
-    rejected: [],
-    blocked: chip('关闭', 'warning') + chip('极低', 'warning') + chip('低', 'warning') + '<div class="rl-cell-sub">连接失败（网络/证书/DNS）——检查网络或代理</div>',
-    short: '已固化',
-    long: '已固化',
-  },
+const LEVELS = ['关闭', '极低', '低', '中', '高', '极高', '最大']
+const PARAMS = [
+  { id: 'temperature', label: '温度', value: '0.7', hint: '越低越稳定，越高越发散', active: true },
+  { id: 'topP', label: 'Top P', value: '0.95', hint: '宿主 0.2.2 的 GenerateOptions 无 topP 字段', active: false },
+  { id: 'topK', label: 'Top K', value: '40', hint: '宿主 0.2.2 的 GenerateOptions 无 topK 字段', active: false },
+  { id: 'maxTokens', label: '最大输出', value: '128k', hint: '单次响应的输出上限（tokens）', active: true },
 ]
 
-const probeTable = `
-<div class="rl-table-wrap">
-  <table class="rl-table rl-probe-table">
-    <thead>
-      <tr>
-        <th class="rl-th rl-col-key">模型</th>
-        <th class="rl-th rl-col-levels">实测可用等级</th>
-        <th class="rl-th rl-col-unavailable">不可用（红=拒绝 / 黄=失败）</th>
-        <th class="rl-th rl-col-persisted">持久化</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${probeRows.map((r) => `
-      <tr>
-        <td class="rl-td rl-cell-key">${r.model}</td>
-        <td class="rl-td"><div class="rl-chips">${chips(r.working, 'success')}</div></td>
-        <td class="rl-td rl-cell-error">${r.rejected.length ? `<div class="rl-chips">${chips(r.rejected, 'danger')}</div>` : ''}${r.blocked}</td>
-        <td class="rl-td rl-col-persisted" title="${r.long}">${r.short}</td>
-      </tr>`).join('')}
-    </tbody>
-  </table>
-</div>`
+// ── 模型列表：4 个 provider × 多模型（长列表滚动/筛选场景）──────────────────
+const MODELS = []
+const providers = ['zai-coding-cn', 'command-code', 'craze-code', 'deepseek-official']
+const names = ['glm-5.3', 'glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4.1-pro', 'gpt-6.1-sol', 'claude-opus-5', 'kimi-k3', 'qwen4-max']
+for (let index = 0; index < 24; index += 1) {
+  const provider = providers[index % providers.length]
+  const base = names[index % names.length]
+  MODELS.push({
+    key: provider + '/' + base + (index >= names.length ? '-v' + Math.floor(index / names.length) : ''),
+    name: base.toUpperCase() + (index >= names.length ? ' · ' + (Math.floor(index / names.length) + 1) : ''),
+    image: index % 3 === 0,
+    override: index % 5 === 0,
+    effort: index % 7 === 0 ? 'max' : 'follow',
+    temp: index % 4 === 0 ? '0.3' : '0.7',
+    context: '200k',
+    maxTokens: '128k',
+  })
+}
+const selectedIndex = 1
 
-// ── 复刻「模型聚合」表（真实数据 + 紧凑数字格式）──────────────────────────
-const statRows = [
-  { model: 'zai-coding-cn/glm-5.3', calls: '20.1k', dist: [['(默认)×63', ''], ['最大×20.1k', 'primary'], ['关闭×1', '']], think: '~30.9M 字', out: '17.6M', dur: '18.9s', err: 1 },
-  { model: 'deepseek-official/deepseek-flash', calls: '19.6k', dist: [['(默认)×40', ''], ['最大×19.6k', 'primary'], ['关闭×2', '']], think: '9.26M tok', out: '20.7M', dur: '13.8s', err: 0 },
-  { model: 'zai-coding-cn/glm-5.3-flash', calls: '10.8k', dist: [['最大×10.8k', 'primary'], ['(默认)×4', '']], think: '~23.8M 字', out: '11.6M', dur: '27.4s', err: 1 },
-  { model: 'command-code/deepseek/deepseek-v4.1-flash', calls: '7285', dist: [['最大×7275', 'primary'], ['(默认)×10', '']], think: '~11.0M 字', out: '7.52M', dur: '17.1s', err: 2 },
-]
+function effortSelect(model) {
+  return `<select class="rl-select" aria-label="思考强度 · ${escaped(model.key)}">
+    <option value="follow"${model.effort === 'follow' ? ' selected' : ''}>跟随全局</option>
+    ${LEVELS.map((label, index) => `<option${model.effort === ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'][index] ? ' selected' : ''}>${label}</option>`).join('')}
+  </select>`
+}
 
-const statsTable = `
-<div class="rl-table-wrap">
-  <table class="rl-table rl-stats-table">
-    <thead>
-      <tr>
-        <th class="rl-th rl-col-key">模型</th>
-        <th class="rl-th rl-col-num"><button class="rl-sort-btn" aria-sort="descending">调用 ↓</button></th>
-        <th class="rl-th rl-col-levels">等级分布</th>
-        <th class="rl-th rl-col-num">思考</th>
-        <th class="rl-th rl-col-num">输出</th>
-        <th class="rl-th rl-col-num">平均耗时</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${statRows.map((r) => `
-      <tr>
-        <td class="rl-td rl-cell-key">${r.model}</td>
-        <td class="rl-td rl-col-num">${r.calls}${r.err > 0 ? `<span class="rl-err-badge" title="错误率%: ${r.err}"> ⚠${r.err}%</span>` : ''}</td>
-        <td class="rl-td"><div class="rl-chips">${r.dist.map(([l, v]) => chip(l, v)).join('')}</div></td>
-        <td class="rl-td rl-col-num">${r.think}</td>
-        <td class="rl-td rl-col-num">${r.out}</td>
-        <td class="rl-td rl-col-num">${r.dur}</td>
-      </tr>`).join('')}
-    </tbody>
-  </table>
-</div>`
+function paramSummary(model) {
+  return `温度 ${model.temp} · Top P 0.95 · Top K 40 · 最大输出 128k`
+}
 
-const html = `<!doctype html>
-<html lang="zh"><head><meta charset="utf-8">
-<title>dsh-reasoning-level UI preview</title>
+function modelRow(model, withInlineDetail) {
+  const row = `
+  <div class="rl-model-row${withInlineDetail ? ' rl-model-row-active' : ''}" data-model-key="${escaped(model.key)}">
+    <div class="rl-model-ident">
+      <button type="button" class="rl-model-open" aria-expanded="${withInlineDetail ? 'true' : 'false'}">
+        <span class="rl-model-name">${escaped(model.name)}</span>
+        <span class="rl-model-id">${escaped(model.key)}</span>
+      </button>
+      <div class="rl-chips">${model.override ? chip('已覆盖', 'primary') : chip('继承')}</div>
+    </div>
+    <div class="rl-model-cell rl-model-effort">${effortSelect(model)}</div>
+    <div class="rl-model-cell rl-model-inputs">
+      <div class="rl-chips">
+        <span class="rl-chip">🔒 文本</span>
+        <button type="button" class="rl-chip rl-chip-btn" aria-pressed="${model.image ? 'true' : 'false'}">图像 ${model.image ? '✓' : '—'}</button>
+      </div>
+    </div>
+    <div class="rl-model-params">${paramSummary(model)}</div>
+  </div>`
+  return row + (withInlineDetail ? inlineDetail(model) : '')
+}
+
+function paramRow(param) {
+  return `
+  <div class="rl-param-row">
+    <div class="rl-param-main">
+      <div class="rl-param-label">${param.label} <span class="rl-chip ${param.active ? 'rl-chip-success' : 'rl-chip-warning'}">${param.active ? '生效' : '预留'}</span></div>
+      <div class="rl-field-hint" title="${escaped(param.hint)}">生效：${param.value}（${param.active ? '模型覆盖' : '预留，不会发送到网关'}）</div>
+    </div>
+    <div class="rl-param-controls">
+      <input type="number" class="rl-input-num" value="${param.value}" aria-label="${param.label}">
+      <button type="button" class="rl-btn rl-btn-ghost rl-btn-sm" aria-pressed="false">跟随默认</button>
+    </div>
+  </div>`
+}
+
+function detailBody(model) {
+  return `
+  <div class="rl-detail-head">
+    <div>
+      <h4 class="rl-detail-title">${escaped(model.name)}</h4>
+      <div class="rl-model-id">${escaped(model.key)}</div>
+    </div>
+    <div class="rl-card-actions">${chip('已覆盖', 'primary')}<button type="button" class="rl-btn rl-btn-ghost rl-btn-sm" aria-label="关闭详情">✕</button></div>
+  </div>
+  <div class="rl-detail-grid">
+    <div class="rl-kv"><div class="rl-kv-label">身份</div><div class="rl-kv-value">${escaped(model.key)}</div></div>
+    <div class="rl-kv"><div class="rl-kv-label">上下文</div><div class="rl-kv-value">${model.context}</div></div>
+    <div class="rl-kv"><div class="rl-kv-label">最大输出</div><div class="rl-kv-value">${model.maxTokens}</div></div>
+  </div>
+  <div class="rl-field">
+    <div class="rl-field-label">思考强度</div>
+    ${effortSelect(model)}
+    <div class="rl-field-hint">模型信息端点 · 不支持档位禁用并注明来源</div>
+  </div>
+  <div class="rl-field">
+    <div class="rl-field-label">多模态</div>
+    <div class="rl-chips"><span class="rl-chip">🔒 文本</span><button type="button" class="rl-chip rl-chip-btn" aria-pressed="${model.image ? 'true' : 'false'}">图像 ${model.image ? '✓' : '—'}</button></div>
+    <div class="rl-field-hint">生效值：Text${model.image ? ' + Image' : ''} ← 配置覆盖</div>
+  </div>
+  <div class="rl-field">
+    <div class="rl-field-label">采样参数</div>
+    ${PARAMS.map(paramRow).join('')}
+  </div>
+  <div class="rl-pills">
+    <button type="button" class="rl-btn rl-btn-danger rl-btn-sm">恢复此模型默认</button>
+    <span class="rl-muted">清除该模型的思考等级、多模态与采样参数覆盖</span>
+  </div>`
+}
+
+function inlineDetail(model) {
+  return `<section class="rl-detail rl-detail-inline" aria-label="模型详情">${detailBody(model)}</section>`
+}
+function asideDetail(model) {
+  return `<aside class="rl-workbench-detail" aria-label="模型详情"><section class="rl-detail">${detailBody(model)}</section></aside>`
+}
+
+function providerGroups(compact) {
+  const groups = new Map()
+  for (const model of MODELS) {
+    if (!groups.has(model.key.split('/')[0])) groups.set(model.key.split('/')[0], [])
+    groups.get(model.key.split('/')[0]).push(model)
+  }
+  return [...groups.entries()].map(([provider, models]) => `
+    <div class="rl-provider" data-provider="${escaped(provider)}">
+      <div class="rl-provider-head"><span>${escaped(provider)}</span><span class="rl-provider-count">${models.length} 个模型</span></div>
+      ${models.map((model) => modelRow(model, compact && model.key === MODELS[selectedIndex].key)).join('')}
+    </div>`).join('')
+}
+
+function workbench(compact) {
+  return `
+  <div class="rl-workbench${compact ? ' rl-workbench-single rl-workbench-narrow' : ''}">
+    <div class="rl-workbench-list">
+      <div class="rl-status rl-status-warn">模型信息端点不可用，已降级使用会话模型目录（部分字段不可用）</div>
+      <div class="rl-toolbar">
+        <div class="rl-toolbar-main">
+          <div class="rl-search-wrap rl-search-grow"><input type="search" class="rl-search" placeholder="搜索模型（名称 / provider / id）"></div>
+          <select class="rl-select" aria-label="路由筛选"><option>全部路由</option>${providers.map((p) => `<option>${p}</option>`).join('')}</select>
+          <button type="button" class="rl-btn rl-btn-secondary rl-btn-sm" aria-pressed="false">仅显示已覆盖</button>
+        </div>
+        <span class="rl-toolbar-meta">显示 24 / 24 个模型</span>
+      </div>
+      ${providerGroups(compact)}
+    </div>
+    ${compact ? '' : asideDetail(MODELS[selectedIndex])}
+  </div>`
+}
+
+function defaultsView() {
+  return `
+  <div class="rl-cards">
+    <section class="rl-card">
+      <h3 class="rl-card-title">全局设置</h3>
+      <div class="rl-switch-field">
+        <div class="rl-switch-line"><span class="rl-switch-text">启用统一默认推理等级</span><button type="button" class="rl-switch rl-switch-on" role="switch" aria-checked="true"><span class="rl-switch-thumb"></span></button></div>
+        <div class="rl-switch-hint">新调用将使用默认等级</div>
+      </div>
+      <div class="rl-field">
+        <div class="rl-field-label">默认推理等级（全局）</div>
+        <div class="rl-seg" role="radiogroup" aria-label="默认推理等级（全局）">
+          ${LEVELS.map((label, index) => `<button type="button" role="radio" aria-checked="${index === 4}" class="rl-seg-item${index === 4 ? ' rl-seg-checked' : ''}"><span class="rl-seg-name">${label}</span><span class="rl-seg-sub">${['不思考', '一笔带过', '轻量推理', '常规推理', '深度推理', '更深推理', '最深推理'][index]}</span></button>`).join('')}
+        </div>
+        <div class="rl-impact"><span class="rl-impact-text">影响预览：24 个模型支持「高」</span></div>
+      </div>
+      <div class="rl-switch-field">
+        <div class="rl-switch-line"><span class="rl-switch-text">同步默认 agent 模型等级</span><button type="button" class="rl-switch" role="switch" aria-checked="false"><span class="rl-switch-thumb"></span></button></div>
+        <div class="rl-switch-hint">开启后全局等级变化会同步写入 agent-default-model.reasoningEffort</div>
+      </div>
+      <div class="rl-applied">已应用：zai-coding-cn=高 / 24 个模型 · DeepSeek 官方：设置为 高</div>
+    </section>
+    <section class="rl-card">
+      <h3 class="rl-card-title">采样预设</h3>
+      <div class="rl-preset-row" role="group" aria-label="采样预设">
+        <button type="button" class="rl-preset" aria-pressed="false">精确</button>
+        <button type="button" class="rl-preset rl-preset-active" aria-pressed="true">均衡</button>
+        <button type="button" class="rl-preset" aria-pressed="false">创意</button>
+        <span class="rl-preset rl-preset-custom">自定义</span>
+      </div>
+      <div class="rl-field-hint">一键套用为全局默认参数；模型级覆盖始终优先。</div>
+      <div class="rl-subtitle">默认参数</div>
+      ${PARAMS.map((param) => `
+      <div class="rl-param-row">
+        <div class="rl-param-main">
+          <div class="rl-param-label">${param.label} <span class="rl-chip ${param.active ? 'rl-chip-success' : 'rl-chip-warning'}">${param.active ? '生效' : '预留'}</span></div>
+          <div class="rl-field-hint">${param.active ? '生效：' + param.value + '（全局默认）' : escaped(param.hint)}</div>
+        </div>
+        <div class="rl-param-controls">
+          <input type="number" class="rl-input-num" value="${param.value}" aria-label="${param.label}">
+          <button type="button" class="rl-btn rl-btn-secondary rl-btn-sm">沿用宿主默认</button>
+        </div>
+      </div>`).join('')}
+      <div class="rl-field-hint">留空 = 沿用宿主/调用方默认；本插件只填充调用方未显式给出的值。</div>
+    </section>
+    <section class="rl-card">
+      <h3 class="rl-card-title">辅助调用等级</h3>
+      <div class="rl-field-row"><span class="rl-field-row-label">压缩 compaction</span><select class="rl-select"><option>关闭</option><option>跟随全局</option></select><span class="rl-muted">辅助调用（压缩 compaction）用此等级</span></div>
+      <div class="rl-field-row"><span class="rl-field-row-label">标题 session-title</span><select class="rl-select"><option>跟随全局</option></select></div>
+      <div class="rl-hint">辅助模型调用（会话压缩、标题生成）可独立设置等级，如用 off 省 token。</div>
+    </section>
+    <section class="rl-card">
+      <h3 class="rl-card-title">优先级说明</h3>
+      <div class="rl-hint">优先级：模型级参数 &gt; 全局默认参数 &gt; 宿主/调用方已给值（不覆盖）。</div>
+      <div class="rl-hint">思考等级：会话/模型选择器显式选择 &gt; 模型级默认 &gt; 全局默认。</div>
+    </section>
+  </div>`
+}
+
+function diagnosticsView() {
+  return `
+  <div class="rl-cards">
+    <section class="rl-card"><h3 class="rl-card-title">宿主契约健康</h3><div class="rl-status rl-status-ok">契约正常</div></section>
+    <section class="rl-card"><h3 class="rl-card-title">端点状态</h3><div class="rl-endpoint-line"><span>模型信息: 不可用</span><span class="rl-chip rl-chip-warning">降级到会话模型目录</span><span>统计: 可用</span></div></section>
+  </div>
+  <section class="rl-card">
+    <h3 class="rl-card-title">扩展注册表</h3>
+    <div class="rl-field-hint">端点不可用，使用内置注册表降级</div>
+    <div class="rl-subtitle">参数注册表</div>
+    <div class="rl-table-wrap"><table class="rl-table rl-registry-table">
+      <thead><tr><th class="rl-th">标识</th><th class="rl-th">名称</th><th class="rl-th">状态</th><th class="rl-th">说明</th></tr></thead>
+      <tbody>${PARAMS.map((param) => `<tr><td class="rl-td">${param.id}</td><td class="rl-td">${param.label}</td><td class="rl-td"><span class="rl-chip ${param.active ? 'rl-chip-success' : 'rl-chip-warning'}">${param.active ? '生效' : '预留'}</span></td><td class="rl-td rl-cell-error">${escaped(param.hint)}</td></tr>`).join('')}</tbody>
+    </table></div>
+  </section>`
+}
+
+function tabs(active) {
+  return `<div class="rl-tabs" role="tablist" aria-label="视图切换">
+    ${[['models', '模型'], ['defaults', '默认与预设'], ['observability', '观测'], ['diagnostics', '诊断']].map(([id, label]) => `<button type="button" role="tab" id="rl-tab-${id}" aria-controls="rl-panel-${id}" aria-selected="${id === active}" class="rl-tab${id === active ? ' rl-tab-active' : ''}" tabindex="${id === active ? 0 : -1}">${label}</button>`).join('')}
+  </div>`
+}
+
+function pageHtml({ active, panel }) {
+  // 真实设置页 modal 场景：视口 1440px 但容器仅 559~800px，媒体查询不会触发窄布局；
+  // 这里按**容器宽度**选择 compact（与 React 侧 ResizeObserver 判定同一阈值）。
+  const compact = panel < 1000
+  return `<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>dsh-reasoning-level · UX-004 UI preview</title>
 <style>
-  body { margin: 0; padding: 24px; background: #ffffff; color: #1a1a1a; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif }
-  .panel { width: ${panelWidth}px; border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; background: #fafafa }
+  body { margin: 0; padding: 24px; display: flex; justify-content: center; background: #ffffff; color: #1a1a1a; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif }
+  .panel { width: ${panel}px; border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; background: #fafafa }
   .gap { height: 16px }
   ${stylesheet}
 </style></head>
-<body><div class="panel"><div class="rl-root">
-  <div class="rl-card"><h3 class="rl-card-title">模型级默认（空输入态：不再铺候选列表）</h3>
-    <div class="rl-field">
-      <div class="rl-field-label">添加模型默认</div>
-      <input type="search" class="rl-search" placeholder="搜索模型（provider/model）">
+<body><div class="panel"><div class="rl-root rl-page">
+  <header class="rl-header">
+    <div class="rl-header-main">
+      <div><h2 class="rl-header-title">统一模型管理</h2><p class="rl-header-sub">一个设置页管理所有模型的思考强度、多模态能力与采样参数</p></div>
+      <div class="rl-header-actions"><div class="rl-pills"><button class="rl-btn rl-btn-secondary rl-btn-sm">刷新</button><button class="rl-btn rl-btn-primary">一键探测全部模型并固化配置</button></div></div>
     </div>
-    <div class="rl-hint">未配置模型级默认；所有未显式选择等级的调用使用全局默认。</div>
-  </div>
-  <div class="gap"></div>
-  <div class="rl-card"><h3 class="rl-card-title">输入后：过滤候选（点击即添加）</h3>
-    <div class="rl-field">
-      <div class="rl-field-label">添加模型默认</div>
-      <input type="search" class="rl-search" value="cucloud">
-      <div class="rl-field-hint">输入完整 provider/model 键可直接添加</div>
-      <div class="rl-search-wrap">
-        <div class="rl-search-list">
-          <button class="rl-search-item"><span class="rl-search-item-main">cucloud / DeepSeek-V4-Pro</span><span class="rl-search-item-chips">${chips(['关闭', '极低', '低', '中', '高', '极高', '最大'], '')}</span></button>
-          <button class="rl-search-item"><span class="rl-search-item-main">cucloud / DeepSeek-V4-Flash</span><span class="rl-search-item-chips">${chips(['关闭', '极低', '低', '中', '高', '极高', '最大'], '')}</span></button>
-        </div>
-      </div>
+    <div class="rl-pills">
+      <span class="rl-pill rl-pill-ok"><span class="rl-pill-dot"></span>启用中</span>
+      <span class="rl-pill rl-pill-primary"><span class="rl-pill-dot"></span>默认：高</span>
+      <span class="rl-pill rl-pill-muted"><span class="rl-pill-dot"></span>生效 4 路由 · 24 模型</span>
     </div>
+  </header>
+  <div class="rl-stats-grid">
+    <div class="rl-stat"><div class="rl-stat-label">思考档位分布</div><div class="rl-stat-value">高</div><div class="rl-stat-sub">5 / 24 模型已覆盖</div><div class="rl-scale" aria-hidden="true">${LEVELS.map((_, index) => `<span class="rl-scale-seg${index <= 4 ? ' rl-scale-seg-on' : ''}"></span>`).join('')}</div></div>
+    <div class="rl-stat"><div class="rl-stat-label">多模态启用</div><div class="rl-stat-value">8</div><div class="rl-stat-sub">8 / 24 模型启用图像输入</div></div>
+    <div class="rl-stat"><div class="rl-stat-label">参数覆盖</div><div class="rl-stat-value">5</div><div class="rl-stat-sub">5 个模型覆盖 · 3 项全局默认</div></div>
+    <div class="rl-stat"><div class="rl-stat-label">契约健康</div><div class="rl-stat-value">降级</div><div class="rl-stat-sub rl-stat-sub-warn">1 项缺失</div></div>
   </div>
-  <div class="gap"></div>
-  <div class="rl-card"><h3 class="rl-card-title">探测结果（默认折叠，摘要行仍在）</h3>
-    <div class="rl-subtitle">实测探测</div>
-    <div class="rl-toolbar"><div class="rl-toolbar-main"><button class="rl-btn rl-btn-sm">导出 CSV</button></div><span class="rl-toolbar-meta">（15 个模型 · 实测用 1-token 请求）</span></div>
-    <div class="rl-status rl-status-ok">已载入上次探测结果（07:58:55 · 持久化回显）</div>
-    <details class="rl-disclosure rl-probe-disclosure"><summary class="rl-disclosure-summary">探测结果 · （15 个模型 · 实测用 1-token 请求）</summary></details>
-  </div>
-  <div class="gap"></div>
-  <div class="rl-card"><h3 class="rl-card-title">探测结果（展开后）</h3>${probeTable}</div>
-  <div class="gap"></div>
-  <div class="rl-card"><h3 class="rl-card-title">模型聚合</h3>${statsTable}</div>
+  ${tabs(active)}
+  ${active === 'models' ? `<section id="rl-panel-models" role="tabpanel" aria-labelledby="rl-tab-models" class="rl-panel"><section class="rl-card"><h3 class="rl-card-title">模型</h3><div class="rl-field-hint">按 provider 分组的模型级默认；点击行编辑思考强度、多模态与采样参数</div>${workbench(compact)}<details class="rl-disclosure"><summary class="rl-disclosure-summary">高级：按 provider/model 键精确管理（可选）</summary></details></section></section>` : ''}
+  ${active === 'defaults' ? `<section id="rl-panel-defaults" role="tabpanel" aria-labelledby="rl-tab-defaults" class="rl-panel">${defaultsView()}</section>` : ''}
+  ${active === 'diagnostics' ? `<section id="rl-panel-diagnostics" role="tabpanel" aria-labelledby="rl-tab-diagnostics" class="rl-panel">${diagnosticsView()}</section>` : ''}
 </div></div></body></html>`
+}
 
 const outDir = join(root, 'tmp')
 mkdirSync(outDir, { recursive: true })
-const htmlPath = join(outDir, 'ui-preview.html')
-writeFileSync(htmlPath, html, 'utf8')
-console.log('ui-preview: wrote ' + htmlPath + ' (panel ' + panelWidth + 'px)')
+const targets = [
+  { name: 'ui-preview', panel: panelWidth },
+  { name: 'ui-preview-wide', panel: 1280 },
+  { name: 'ui-preview-narrow', panel: 420 },
+  // 真实设置页场景：1440×1200 视口 + 559/800px 容器（媒体查询不触发，必须靠容器判定）。
+  { name: 'ui-preview-modal-800', panel: 800, viewportWidth: 1440, viewportHeight: 1200 },
+  { name: 'ui-preview-modal-559', panel: 559, viewportWidth: 1440, viewportHeight: 1200 },
+]
+for (const target of targets) {
+  const html = pageHtml({ active: 'models', panel: target.panel })
+  writeFileSync(join(outDir, target.name + '.html'), html, 'utf8')
+  console.log('ui-preview: wrote tmp/' + target.name + '.html (panel ' + target.panel + 'px, ' + (target.panel < 1000 ? 'compact' : 'wide') + ' layout)')
+}
+const defaultsHtml = pageHtml({ active: 'defaults', panel: panelWidth })
+writeFileSync(join(outDir, 'ui-preview-defaults.html'), defaultsHtml, 'utf8')
+console.log('ui-preview: wrote tmp/ui-preview-defaults.html (defaults view, panel ' + panelWidth + 'px)')
 
-// ── 截图（Playwright 缺失时只产出 HTML）──────────────────────────────────
+// ── 截图 + 横向溢出检查（Playwright 缺失时只产出 HTML）────────────────────
 // ESM `import('playwright')` 不读 NODE_PATH，所以按候选目录用 createRequire 解析：
 // ①本仓库自身依赖 ②PLAYWRIGHT_HOME 环境变量 ③本机 dev_toolchain 约定位置。
 const { createRequire } = await import('node:module')
-const { existsSync } = await import('node:fs')
 function loadPlaywright() {
   const bases = [import.meta.url]
   if (process.env.PLAYWRIGHT_HOME) bases.unshift(join(process.env.PLAYWRIGHT_HOME, 'package.json'))
@@ -199,9 +344,41 @@ if (playwright === undefined) {
   process.exit(0)
 }
 const browser = await playwright.chromium.launch()
-const page = await browser.newPage({ viewport: { width: panelWidth + 80, height: 900 }, deviceScaleFactor: 1 })
-await page.goto('file:///' + htmlPath.replace(/\\/g, '/'))
-const pngPath = join(outDir, 'ui-preview.png')
-await page.screenshot({ path: pngPath, fullPage: true })
+let overflow = false
+for (const target of [...targets, { name: 'ui-preview-defaults', panel: panelWidth }]) {
+  const viewportWidth = target.viewportWidth ?? target.panel + 80
+  const viewportHeight = target.viewportHeight ?? 900
+  const page = await browser.newPage({ viewport: { width: viewportWidth, height: viewportHeight }, deviceScaleFactor: 1 })
+  await page.goto('file:///' + join(outDir, target.name + '.html').replace(/\\/g, '/'))
+  const metrics = await page.evaluate(() => {
+    const workbench = document.querySelector('.rl-workbench')
+    const row = document.querySelector('.rl-model-row')
+    const list = document.querySelector('.rl-workbench-list')
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+      workbenchClass: workbench !== null ? workbench.className : '',
+      rowTracks: row !== null ? getComputedStyle(row).gridTemplateColumns.split(' ').filter(Boolean).length : 0,
+      listWidth: list !== null ? Math.round(list.getBoundingClientRect().width) : 0,
+    }
+  })
+  if (metrics.scrollWidth > metrics.clientWidth + 1) {
+    console.error('ui-preview: horizontal overflow in ' + target.name + ' (' + metrics.scrollWidth + ' > ' + metrics.clientWidth + ') at panel ' + target.panel + 'px')
+    overflow = true
+  }
+  // 容器级窄布局断言：narrow 下不得仍是 4 列；容器 559/800px 时列表不得被空详情列挤成窄条。
+  const narrowClass = metrics.workbenchClass.split(/\s+/).includes('rl-workbench-narrow')
+  if (narrowClass && metrics.rowTracks > 2) {
+    console.error('ui-preview: narrow workbench must not keep a 4-column model row — ' + target.name + ' tracks=' + metrics.rowTracks)
+    overflow = true
+  }
+  if (target.panel >= 500 && target.panel < 1000 && narrowClass && metrics.listWidth < 300) {
+    console.error('ui-preview: compact workbench list collapsed to ' + metrics.listWidth + 'px — ' + target.name)
+    overflow = true
+  }
+  await page.screenshot({ path: join(outDir, target.name + '.png'), fullPage: true })
+  await page.close()
+  console.log('ui-preview: wrote tmp/' + target.name + '.png (viewport ' + viewportWidth + '×' + viewportHeight + ', panel ' + target.panel + 'px, list ' + metrics.listWidth + 'px, row tracks ' + metrics.rowTracks + ', scrollWidth ' + metrics.scrollWidth + ')')
+}
 await browser.close()
-console.log('ui-preview: wrote ' + pngPath)
+if (overflow) process.exit(1)

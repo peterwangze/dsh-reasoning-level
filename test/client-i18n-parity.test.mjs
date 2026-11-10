@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import vm from 'node:vm'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const source = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
@@ -76,4 +77,80 @@ test('(FEAT-004/i18n-3) LEVEL_LABELS 两语言均覆盖 7 档', () => {
     assert.ok(new RegExp('\\b' + level + ':').test(zhLine), `LEVEL_LABELS.zh 缺档位 ${level}`)
     assert.ok(new RegExp('\\b' + level + ':').test(enLine), `LEVEL_LABELS.en 缺档位 ${level}`)
   }
+})
+
+test('(UX-004/i18n-4) 工作台新增文案 key 在 zh/en 两侧都存在', () => {
+  const langBlock = dictBlock('const LANG = {', '\n    function makeT')
+  const zhIndex = langBlock.indexOf('      zh: {')
+  const enIndex = langBlock.indexOf('      en: {')
+  const zhKeys = new Set(topLevelKeys(langBlock.slice(zhIndex, enIndex)))
+  const enKeys = new Set(topLevelKeys(langBlock.slice(enIndex)))
+  const required = [
+    'tabModels', 'tabDefaults', 'tabObservability', 'tabDiagnostics',
+    'searchModels', 'filterProvider', 'onlyOverridden', 'overrideBadge', 'inheritedBadge',
+    'reasoningLevelShort', 'reasoningSourceMeasured', 'multimodal', 'effectiveValue',
+    'paramsTitle', 'paramFollow', 'paramOverride', 'hostActive', 'hostReserved', 'hostReservedHint',
+    'resetModel', 'presetPrecise', 'presetBalanced', 'presetCreative', 'presetCustom', 'presetsTitle',
+    'defaultParams', 'defaultParamsHint', 'modelsEmpty', 'modelsEmptyHint',
+    'overviewThinkingDist', 'overviewMultimodal', 'overviewParamOverrides', 'overviewContract',
+    'contractHealth', 'agentSelection', 'registryTitle', 'registryParams', 'registryModalities',
+    'endpointStatus', 'probeState', 'observabilityHint', 'fallbackNotice', 'closeDetail',
+  ]
+  for (const key of required) {
+    assert.ok(zhKeys.has(key), `zh 字典缺 UX-004 key: ${key}`)
+    assert.ok(enKeys.has(key), `en 字典缺 UX-004 key: ${key}`)
+  }
+})
+
+test('(UX-004/i18n-5) LEVEL_HINTS 7 档 zh/en 成对（等级文案唯一入口）', () => {
+  const block = dictBlock('const LEVEL_HINTS = {', '// 语言一律由 t 携带')
+  for (const level of LEVELS) {
+    const start = block.indexOf('      ' + level + ': {')
+    assert.ok(start >= 0, `LEVEL_HINTS 缺档位 ${level}`)
+    const rest = block.slice(start)
+    const next = rest.slice(1).search(/\n {6}[a-z]+: \{/)
+    const section = next >= 0 ? rest.slice(0, next + 1) : rest
+    assert.ok(section.includes('zh: {'), `LEVEL_HINTS.${level} 缺 zh`)
+    assert.ok(section.includes('en: {'), `LEVEL_HINTS.${level} 缺 en`)
+  }
+})
+
+/**
+ * T-F4：key 集合相等还不够——空串或「英文侧直接抄中文」也会让 UI 在英文界面
+ * 露出中文。这里把 LANG 对象字面量放进 vm 求值（值只有字符串/箭头函数），
+ * 对所有字符串值做非空 + zh !== en 检查；函数/嵌套对象值跳过（但两侧
+ * 类型必须一致），避免把 persistedShort 这类状态表误当文案。
+ *
+ * 白名单只允许**确属专有名词/双臂有意相同**的 key；当前字典没有同值项，
+ * 故为空。新增同值文案必须显式登记，否则这里判红（避免把已有合法同值 key
+ * 误判——白名单是显式清单，不是按值模糊放行）。
+ */
+const SAME_VALUE_ALLOWLIST = new Set([])
+
+function langDictionaries() {
+  const langBlock = dictBlock('const LANG = {', '\n    function makeT')
+  const objectLiteral = langBlock.slice(langBlock.indexOf('{'))
+  const lang = vm.runInNewContext('(' + objectLiteral + ')', Object.create(null), { timeout: 1000 })
+  assert.ok(lang !== null && typeof lang === 'object' && lang.zh !== undefined && lang.en !== undefined, 'LANG literal must evaluate to { zh, en }')
+  return lang
+}
+
+test('(UX-004/i18n-6) LANG 值质量：字符串非空且 zh/en 不互相抄写（专有名词白名单例外）', () => {
+  const lang = langDictionaries()
+  const zhKeys = Object.keys(lang.zh)
+  const enKeys = Object.keys(lang.en)
+  assert.deepEqual(enKeys.sort(), zhKeys.sort(), 'value-quality check requires identical key sets')
+  const problems = []
+  for (const key of zhKeys) {
+    const zh = lang.zh[key]
+    const en = lang.en[key]
+    if (typeof zh !== 'string' || typeof en !== 'string') {
+      assert.equal(typeof zh, typeof en, `LANG.${key} 的值类型在 zh/en 不一致`)
+      continue
+    }
+    if (zh.trim() === '') problems.push(key + ': zh 为空')
+    if (en.trim() === '') problems.push(key + ': en 为空')
+    if (zh === en && !SAME_VALUE_ALLOWLIST.has(key)) problems.push(key + ': zh 与 en 相同（' + JSON.stringify(zh) + '）')
+  }
+  assert.deepEqual(problems, [], 'i18n 值质量问题（空串/英文抄中文）；确属专有名词请登记 SAME_VALUE_ALLOWLIST')
 })

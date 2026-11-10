@@ -28,6 +28,10 @@ const source = readFileSync(join(root, 'lib/client.js'), 'utf8')
 const stores = new Map()
 let currentComponent = ''
 let hookIndex = 0
+// T-F3：真实容器宽度回归。仅当用例设置非 0 值时，把 host 元素的 ref 桩成带
+// getBoundingClientRect 的节点（模拟浏览器已布局的 DOM），让组件自己的
+// ResizeObserver/挂载测量路径跑起来，而不是手写窄布局标记。
+let measuredRefWidth = 0
 
 function slots() {
   if (!stores.has(currentComponent)) stores.set(currentComponent, [])
@@ -42,7 +46,11 @@ function resetHooks(name) {
 const react = {
   createElement(tag, props, ...children) {
     const flat = (list) => list.flat(Infinity)
-    return { $$: typeof tag === 'function' ? 'component' : String(tag), tag, props: props ?? {}, children: flat(children) }
+    const normalized = props ?? {}
+    if (measuredRefWidth > 0 && normalized.ref !== null && typeof normalized.ref === 'object') {
+      normalized.ref.current = { getBoundingClientRect: () => ({ width: measuredRefWidth, height: 800 }) }
+    }
+    return { $$: typeof tag === 'function' ? 'component' : String(tag), tag, props: normalized, children: flat(children) }
   },
   useState(initial) {
     const store = slots()
@@ -238,6 +246,16 @@ const sandbox = {
     head: { appendChild: () => {} },
     getElementById: () => null,
     createElement: () => ({ setAttribute() {}, click() {} }),
+    // UX-004：Esc 关闭详情依赖 document keydown 监听；冒烟记录 handler 直接派发。
+    __listeners: { keydown: [] },
+    addEventListener(type, handler) {
+      if (this.__listeners[type] === undefined) this.__listeners[type] = []
+      this.__listeners[type].push(handler)
+    },
+    removeEventListener(type, handler) {
+      if (this.__listeners[type] === undefined) return
+      this.__listeners[type] = this.__listeners[type].filter((entry) => entry !== handler)
+    },
   },
   fetch: async () => ({ ok: true, status: 200, json: async () => STATS_FIXTURE }),
 }
@@ -1217,6 +1235,763 @@ if (!textOf(enPage).includes('may still bill thinking')) {
   process.exit(1)
 }
 
+// ══ UX-004：四视图 + 模型中心工作台写路径 ═══════════════════════════════════
+// 端点夹具（设计 §6 形状，含 params/modalities/contractHealth）；describe 夹具带
+// models/modelParams/modelInput/defaults（FEAT-007 schema 形状）。端点可用时模型列表
+// 以端点为准（vendor/x1 不在 catalog 中，能证明「端点为主」）。
+const MODEL_ENDPOINT_FIXTURE = {
+  version: 1,
+  generatedAt: 1757100000000,
+  routes: [
+    { provider: 'demo', name: 'Demo', kind: 'pi-ai' },
+    { provider: 'vendor', name: 'Vendor', kind: 'deepseek' },
+  ],
+  models: [
+    {
+      provider: 'demo', model: 'm1', name: 'M1', kind: 'pi-ai',
+      input: { declared: ['text'], effective: ['text'], source: 'catalog' },
+      reasoning: { efforts: ['high', 'max'], defaultEffort: 'high' },
+      contextWindow: 200000, maxTokens: 128000,
+      // 服务端 configured.params 是 effective（defaults ∪ modelParams）投影，不是显式覆盖。
+      configured: { reasoningEffort: null, input: null, params: { temperature: 0.7 } },
+    },
+    {
+      provider: 'demo', model: 'm2', name: 'M2', kind: 'pi-ai',
+      input: { declared: ['text', 'image'], effective: ['text', 'image'], source: 'config' },
+      reasoning: { efforts: ['low', 'high'], defaultEffort: 'high' },
+      contextWindow: 128000, maxTokens: 64000,
+      configured: { reasoningEffort: 'high', input: ['text', 'image'], params: { temperature: 0.5 } },
+    },
+    {
+      provider: 'vendor', model: 'x1', name: 'X1', kind: 'deepseek',
+      input: { declared: ['text'], effective: ['text'], source: 'default' },
+      reasoning: { efforts: ['high'], defaultEffort: 'high' },
+      contextWindow: 64000, maxTokens: 32000,
+      configured: { reasoningEffort: null, input: null, params: { temperature: 0.7 } },
+    },
+  ],
+  params: [
+    { id: 'temperature', type: 'number', min: 0, max: 2, step: 0.05, decimals: 2, label: { zh: '温度', en: 'Temperature' }, hostSupport: 'active' },
+    { id: 'topP', type: 'number', min: 0, max: 1, step: 0.05, decimals: 2, label: { zh: 'Top P', en: 'Top P' }, hostSupport: 'reserved', reason: { zh: '宿主 0.2.2 的 GenerateOptions 无 topP 字段', en: 'DSH 0.2.2 GenerateOptions has no topP field' } },
+    { id: 'topK', type: 'integer', min: 0, max: 1000000, step: 1, label: { zh: 'Top K', en: 'Top K' }, hostSupport: 'reserved', reason: { zh: '宿主 0.2.2 的 GenerateOptions 无 topK 字段', en: 'DSH 0.2.2 GenerateOptions has no topK field' } },
+    { id: 'maxTokens', type: 'integer', min: 1, max: 2000000, step: 1, label: { zh: '最大输出', en: 'Max output' }, hostSupport: 'active' },
+  ],
+  modalities: [
+    { id: 'text', label: { zh: '文本', en: 'Text' }, required: true },
+    { id: 'image', label: { zh: '图像', en: 'Image' }, required: false },
+  ],
+  contractHealth: { ok: true, missing: [] },
+}
+const UX004_DESCRIBE = {
+  result: {
+    ok: true,
+    value: {
+      namespaces: [
+        {
+          ns: 'llm-reasoning',
+          value: {
+            enabled: true, level: 'high', models: { 'demo/m2': 'high' }, purposes: {}, syncDefaultAgent: false, statsPublic: false,
+            defaults: { preset: 'balanced', params: { temperature: 0.7 } },
+            modelParams: { 'demo/m2': { temperature: 0.5 } },
+            modelInput: { 'demo/m2': ['text', 'image'] },
+          },
+        },
+        { ns: 'llm-pi-ai', value: { providers: { demo: { reasoning: 'high', models: [{ id: 'm1', reasoningEfforts: { high: 'high', max: 'max' } }, { id: 'm2' }] } } } },
+        { ns: 'llm-deepseek', value: { reasoningEffort: 'high' } },
+      ],
+    },
+  },
+}
+API.settings.describe = async () => UX004_DESCRIBE
+const ux004Fetch = async (url) => (url === '/reasoning-level-models'
+  ? { ok: true, status: 200, json: async () => MODEL_ENDPOINT_FIXTURE }
+  : { ok: true, status: 200, json: async () => STATS_FIXTURE })
+sandbox.fetch = ux004Fetch
+stores.clear()
+
+const readPage = async () => renderTwice('ReasoningPage', pageElement.tag, pageElement.props)
+const collectMatching = (tree, predicate) => {
+  const out = []
+  collectByProps(tree, predicate, out)
+  return out
+}
+const spanOf = (tree) => { const text = []; collectText(tree, text); return text.join('|') }
+const tabEntryOf = (tree) => findComponent(tree, 'TabBar')
+const renderTabs = (tree) => {
+  const entry = tabEntryOf(tree)
+  if (entry === undefined) {
+    console.error('smoke: UX-004 TabBar component missing from page tree')
+    process.exit(1)
+  }
+  resetHooks('TabBar')
+  return entry[1](entry[2])
+}
+const panelOf = (tree, id) => collectMatching(tree, (node) => node.$$ === 'section' && node.props?.id === 'rl-panel-' + id)[0]
+const selectedTabId = (tabTree) => {
+  const tabs = collectMatching(tabTree, (node) => node.$$ === 'button' && typeof node.props?.['data-view'] === 'string')
+  const selected = tabs.filter((node) => node.props['aria-selected'] === true)
+  return { tabs, selected: selected.map((node) => node.props['data-view']) }
+}
+
+// ── 2p. 四视图 tabs：button + aria-selected + aria-controls + 方向键 ───────────
+let uxPage = await readPage()
+let tabTree = renderTabs(uxPage)
+let tabState = selectedTabId(tabTree)
+if (tabState.tabs.length !== 4 || tabState.selected.join(',') !== 'models') {
+  console.error('smoke: UX-004 must render 4 tab buttons with models selected by default — got ' + JSON.stringify(tabState))
+  process.exit(1)
+}
+if (!tabState.tabs.every((node) => node.props.role === 'tab' && typeof node.props['aria-controls'] === 'string')) {
+  console.error('smoke: UX-004 tabs must be role=tab with aria-controls (a11y)')
+  process.exit(1)
+}
+for (const id of ['models', 'defaults', 'observability', 'diagnostics']) {
+  const panel = panelOf(uxPage, id)
+  if (panel === undefined || panel.props.role !== 'tabpanel') {
+    console.error('smoke: UX-004 tabpanel #rl-panel-' + id + ' must exist with role=tabpanel')
+    process.exit(1)
+  }
+  if ((panel.props.hidden === false) !== (id === 'models')) {
+    console.error('smoke: UX-004 only the models panel may be visible initially — ' + id + ' hidden=' + panel.props.hidden)
+    process.exit(1)
+  }
+}
+const modelsTab = tabState.tabs.find((node) => node.props['data-view'] === 'models')
+modelsTab.props.onKeyDown({ key: 'ArrowRight', preventDefault() {}, currentTarget: null })
+uxPage = await readPage()
+tabTree = renderTabs(uxPage)
+tabState = selectedTabId(tabTree)
+if (tabState.selected.join(',') !== 'defaults') {
+  console.error('smoke: ArrowRight on the models tab must select the defaults tab (keyboard reachable) — got ' + JSON.stringify(tabState.selected))
+  process.exit(1)
+}
+if ((panelOf(uxPage, 'defaults').props.hidden === false) !== true
+  || (panelOf(uxPage, 'models').props.hidden === false) !== false) {
+  console.error('smoke: switching tabs must move the visible panel')
+  process.exit(1)
+}
+const defaultsTitles = collectMatching(panelOf(uxPage, 'defaults'), (node) => node.$$ === 'component' && node.tag?.name === 'Card')
+  .map((node) => node.props.title)
+if (!defaultsTitles.includes('全局设置') || !defaultsTitles.includes('采样预设')) {
+  console.error('smoke: defaults view must render the global card and sampling presets — titles=' + JSON.stringify(defaultsTitles))
+  process.exit(1)
+}
+const diagnosticsEntry = findComponent(uxPage, 'DiagnosticsPanel')
+if (diagnosticsEntry === undefined) {
+  console.error('smoke: UX-004 DiagnosticsPanel component missing')
+  process.exit(1)
+}
+resetHooks('DiagnosticsPanel')
+const diagnosticsTree = diagnosticsEntry[1](diagnosticsEntry[2])
+const diagnosticsText = spanOf(diagnosticsTree)
+const diagnosticsTitles = collectMatching(diagnosticsTree, (node) => node.$$ === 'component' && node.tag?.name === 'Card')
+  .map((node) => node.props.title)
+const diagnosticsChips = collectMatching(diagnosticsTree, (node) => node.$$ === 'component' && node.tag?.name === 'LevelChip')
+  .map((node) => node.props.label)
+if (!diagnosticsChips.includes('预留') || !diagnosticsChips.includes('生效')) {
+  console.error('smoke: diagnostics parameter registry must badge 生效/预留 — got ' + JSON.stringify(diagnosticsChips))
+  process.exit(1)
+}
+for (const expected of ['契约正常', '参数注册表', 'topP', '宿主 0.2.2 的 GenerateOptions 无 topP 字段']) {
+  if (!diagnosticsText.includes(expected)) {
+    console.error('smoke: diagnostics view missing "' + expected + '" — got ' + diagnosticsText.slice(0, 500))
+    process.exit(1)
+  }
+}
+if (!diagnosticsTitles.includes('扩展注册表')) {
+  console.error('smoke: diagnostics view must render the extension registry card — titles=' + JSON.stringify(diagnosticsTitles))
+  process.exit(1)
+}
+// T-F9：方向键全矩阵（Right/Down = +1，Left/Up = -1，循环）。
+const arrowMatrix = [
+  { key: 'ArrowRight', expected: 'defaults' },
+  { key: 'ArrowDown', expected: 'defaults' },
+  { key: 'ArrowLeft', expected: 'diagnostics' },
+  { key: 'ArrowUp', expected: 'diagnostics' },
+]
+for (const arrowCase of arrowMatrix) {
+  let matrixTabs = renderTabs(uxPage)
+  let matrixState = selectedTabId(matrixTabs)
+  if (matrixState.selected[0] !== 'models') {
+    matrixState.tabs.find((node) => node.props['data-view'] === 'models').props.onClick()
+    uxPage = await readPage()
+    matrixTabs = renderTabs(uxPage)
+    matrixState = selectedTabId(matrixTabs)
+  }
+  const fromTab = matrixState.tabs.find((node) => node.props['data-view'] === 'models')
+  let prevented = false
+  fromTab.props.onKeyDown({ key: arrowCase.key, preventDefault() { prevented = true }, currentTarget: null })
+  uxPage = await readPage()
+  const afterArrow = selectedTabId(renderTabs(uxPage)).selected[0]
+  if (!prevented || afterArrow !== arrowCase.expected) {
+    console.error('smoke: ' + arrowCase.key + ' on models must select ' + arrowCase.expected + ' and preventDefault — got ' + afterArrow + ' prevented=' + prevented)
+    process.exit(1)
+  }
+}
+// 回到模型视图，驱动工作台
+tabState.tabs.find((node) => node.props['data-view'] === 'models').props.onClick()
+uxPage = await readPage()
+
+// ── 2q. 模型视图：端点分组 / 搜索 / 路由筛选 / 仅已覆盖 / 行内写路径 ─────────
+let wbEntry = findComponent(uxPage, 'ModelWorkbench')
+if (wbEntry === undefined) {
+  console.error('smoke: UX-004 ModelWorkbench component missing from the models view')
+  process.exit(1)
+}
+// T-F3 需要直接驱动真实组件（不是手写窄布局 markup），保留原始函数/props 快照。
+const realWorkbenchFn = wbEntry[1]
+const realWorkbenchProps = wbEntry[2]
+const renderWb = (props, name = 'ModelWorkbench') => {
+  const entry = findComponent(uxPage, 'ModelWorkbench')
+  resetHooks(name)
+  return entry[1]({ ...entry[2], ...props })
+}
+let wbTree = renderWb({ narrow: false })
+await effectsRan()
+const wbRoot = collectMatching(wbTree, (node) => typeof node.props?.className === 'string' && node.props.className.split(/\s+/).includes('rl-workbench'))[0]
+if (wbRoot === undefined || !wbRoot.props.className.split(/\s+/).includes('rl-workbench-single')
+  || wbRoot.props.className.split(/\s+/).includes('rl-workbench-narrow')) {
+  console.error('smoke: no-selection wide workbench must be single-column (no empty 300px detail column) — got ' + JSON.stringify(wbRoot?.props?.className))
+  process.exit(1)
+}
+if (collectMatching(wbTree, (node) => node.$$ === 'aside').length > 0) {
+  console.error('smoke: no-selection workbench must not render an empty detail aside')
+  process.exit(1)
+}
+const rowKeys = () => collectMatching(wbTree, (node) => typeof node.props?.['data-model-key'] === 'string')
+  .map((node) => node.props['data-model-key'])
+if (!rowKeys().includes('vendor/x1') || rowKeys().length !== 3) {
+  console.error('smoke: endpoint models must drive the workbench (vendor/x1 proves endpoint-over-catalog) — got ' + JSON.stringify(rowKeys()))
+  process.exit(1)
+}
+const providerGroups = collectMatching(wbTree, (node) => typeof node.props?.['data-provider'] === 'string')
+if (providerGroups.length !== 2) {
+  console.error('smoke: models must group by provider (2 groups) — got ' + providerGroups.length)
+  process.exit(1)
+}
+const wbText = spanOf(wbTree)
+if (!wbText.includes('温度 0.5*') || !wbText.includes('图像 ✓')) {
+  console.error('smoke: model row must summarise params (override *) and multimodal chips — got ' + wbText.slice(0, 400))
+  process.exit(1)
+}
+if (wbText.includes('温度 0.7*')) {
+  console.error('smoke: endpoint.configured.params is effective (defaults ∪ overrides) — it must NOT mark inherited defaults as model overrides')
+  process.exit(1)
+}
+// 搜索
+const wbSearch = collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'SearchField')[0]
+if (wbSearch === undefined) {
+  console.error('smoke: model view must render a SearchField')
+  process.exit(1)
+}
+wbSearch.props.onChange('m2')
+wbTree = renderWb({ narrow: false })
+if (rowKeys().join(',') !== 'demo/m2') {
+  console.error('smoke: model search must filter by query — got ' + JSON.stringify(rowKeys()))
+  process.exit(1)
+}
+wbSearch.props.onChange('')
+wbTree = renderWb({ narrow: false })
+// 路由筛选
+const providerSelect = collectMatching(wbTree, (node) => node.$$ === 'select' && node.props?.['data-provider-filter'] !== undefined)[0]
+providerSelect.props.onChange({ target: { value: 'vendor' } })
+wbTree = renderWb({ narrow: false })
+if (rowKeys().join(',') !== 'vendor/x1') {
+  console.error('smoke: route filter must narrow to the selected provider — got ' + JSON.stringify(rowKeys()))
+  process.exit(1)
+}
+providerSelect.props.onChange({ target: { value: 'all' } })
+wbTree = renderWb({ narrow: false })
+// 仅显示已覆盖
+const overriddenBtn = collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'Button' && node.props?.['data-only-overridden'] !== undefined)[0]
+overriddenBtn.props.onClick()
+wbTree = renderWb({ narrow: false })
+if (rowKeys().join(',') !== 'demo/m2') {
+  console.error('smoke: 「仅显示已覆盖」must keep only overridden models — got ' + JSON.stringify(rowKeys()))
+  process.exit(1)
+}
+const offOverriddenBtn = collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'Button' && node.props?.['data-only-overridden'] !== undefined)[0]
+offOverriddenBtn.props.onClick()
+wbTree = renderWb({ narrow: false })
+if (rowKeys().length !== 3) {
+  console.error('smoke: turning 「仅显示已覆盖」off must restore every model — got ' + JSON.stringify(rowKeys()))
+  process.exit(1)
+}
+// 行内思考强度写路径（models dict）
+let writesBefore = writeCalls.length
+const inlineEffortEntry = collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'EffortSelect'
+  && node.props?.dataAttr === 'data-model-effort' && node.props?.row?.key === 'demo/m1')[0]
+if (inlineEffortEntry === undefined) {
+  console.error('smoke: model row must expose an inline reasoning select')
+  process.exit(1)
+}
+const inlineEffortTree = inlineEffortEntry.tag(inlineEffortEntry.props)
+const effortSelect = collectMatching(inlineEffortTree, (node) => node.$$ === 'select')[0]
+if (effortSelect === undefined) {
+  console.error('smoke: inline reasoning control must render a native select')
+  process.exit(1)
+}
+effortSelect.props.onChange({ target: { value: 'max' } })
+await effectsRan()
+let uxUpdatePatches = writeCalls.slice(writesBefore).filter((call) => call.method === 'update').map((call) => call.patch)
+if (!uxUpdatePatches.some((patch) => patch.models !== undefined && patch.models['demo/m1'] === 'max')) {
+  console.error('smoke: inline reasoning select must write models[key] via settings.update — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
+  process.exit(1)
+}
+// 选择「跟随全局」= 清除模型级覆盖（mutate unset models/key）
+writesBefore = writeCalls.length
+const m2EffortEntry = collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'EffortSelect'
+  && node.props?.dataAttr === 'data-model-effort' && node.props?.row?.key === 'demo/m2')[0]
+const m2EffortTree = m2EffortEntry.tag(m2EffortEntry.props)
+const m2EffortSelect = collectMatching(m2EffortTree, (node) => node.$$ === 'select')[0]
+m2EffortSelect.props.onChange({ target: { value: 'follow' } })
+await effectsRan()
+if (!writeCalls.slice(writesBefore).some((call) => call.method === 'mutate'
+  && call.ops.some((op) => op.op === 'unset' && JSON.stringify(op.path) === JSON.stringify(['models', 'demo/m2'])))) {
+  console.error('smoke: choosing 「跟随全局」must clear the model-level override via mutate unset models/key — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
+  process.exit(1)
+}
+// 行内多模态写路径（modelInput）
+writesBefore = writeCalls.length
+const imageBtn = collectMatching(wbTree, (node) => node.$$ === 'button' && node.props?.['data-model-image'] === 'demo/m2')[0]
+if (imageBtn === undefined || imageBtn.props['aria-pressed'] !== true) {
+  console.error('smoke: model row image toggle must expose aria-pressed=true for effective image input')
+  process.exit(1)
+}
+imageBtn.props.onClick()
+await effectsRan()
+uxUpdatePatches = writeCalls.slice(writesBefore).filter((call) => call.method === 'update').map((call) => call.patch)
+if (!uxUpdatePatches.some((patch) => Array.isArray(patch.modelInput?.['demo/m2']) && patch.modelInput['demo/m2'].join(',') === 'text')) {
+  console.error('smoke: image toggle must write modelInput[key] via settings.update — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
+  process.exit(1)
+}
+
+// ── 2r. 详情面板：Esc 关闭 / 参数跟随 / 参数写入 / 恢复模型默认 / 窄屏展开 ────
+const openButton = collectMatching(wbTree, (node) => node.$$ === 'button' && node.props?.['data-model-open'] === 'demo/m2')[0]
+openButton.props.onClick({ stopPropagation() {} })
+wbTree = renderWb({ narrow: false })
+await effectsRan()
+let detailEntry = findComponent(wbTree, 'ModelDetail')
+if (detailEntry === undefined) {
+  console.error('smoke: clicking a model row must open the detail panel')
+  process.exit(1)
+}
+if (!collectMatching(wbTree, (node) => typeof node.props?.className === 'string' && node.props.className.includes('rl-workbench-detail')).length) {
+  console.error('smoke: wide layout must render the detail as a right-hand aside')
+  process.exit(1)
+}
+resetHooks('ModelDetail')
+let detailTree = detailEntry[1](detailEntry[2])
+const detailText = spanOf(detailTree)
+if (!detailText.includes('身份') || !detailText.includes('上下文') || !detailText.includes('采样参数')) {
+  console.error('smoke: detail must render identity/context/params sections — got ' + detailText.slice(0, 400))
+  process.exit(1)
+}
+// T-F9：四个采样参数都必须有控件；生效/预留徽章 + 预留原因必须在详情里可见。
+const detailParamIds = collectMatching(detailTree, (node) => node.$$ === 'input' && typeof node.props?.['data-param'] === 'string')
+  .map((node) => node.props['data-param'])
+for (const paramId of ['temperature', 'topP', 'topK', 'maxTokens']) {
+  if (!detailParamIds.includes(paramId)) {
+    console.error('smoke: detail must render a ' + paramId + ' control — got ' + JSON.stringify(detailParamIds))
+    process.exit(1)
+  }
+}
+const detailParamChips = collectMatching(detailTree, (node) => node.$$ === 'component' && node.tag?.name === 'ParamHostChip')
+  .flatMap((entry) => {
+    const chipTree = entry.tag(entry.props)
+    return collectMatching(chipTree, (node) => node.$$ === 'component' && node.tag?.name === 'LevelChip')
+      .map((node) => node.props.label)
+  })
+if (!detailParamChips.includes('生效') || !detailParamChips.includes('预留')) {
+  console.error('smoke: detail params must badge 生效/预留 — got ' + JSON.stringify(detailParamChips))
+  process.exit(1)
+}
+for (const expected of ['宿主 0.2.2 的 GenerateOptions 无 topP 字段', '宿主 0.2.2 的 GenerateOptions 无 topK 字段']) {
+  if (!detailText.includes(expected)) {
+    console.error('smoke: detail reserved params must show the reason "' + expected + '" — got ' + detailText.slice(0, 600))
+    process.exit(1)
+  }
+}
+// 参数写入（modelParams 整体 set）
+writesBefore = writeCalls.length
+const tempInput = collectMatching(detailTree, (node) => node.$$ === 'input' && node.props?.['data-param'] === 'temperature')[0]
+if (tempInput === undefined) {
+  console.error('smoke: detail must render a temperature input')
+  process.exit(1)
+}
+tempInput.props.onChange({ target: { value: '0.3' } })
+await effectsRan()
+let mutateCalls = writeCalls.slice(writesBefore).filter((call) => call.method === 'mutate')
+if (!mutateCalls.some((call) => call.ops.some((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['modelParams', 'demo/m2']) && op.value.temperature === 0.3))) {
+  console.error('smoke: parameter input must write modelParams[key] via mutate set — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
+  process.exit(1)
+}
+// 跟随默认（删字段后整体 set）
+writesBefore = writeCalls.length
+const followBtn = collectMatching(detailTree, (node) => node.$$ === 'component' && node.tag?.name === 'Button' && node.props?.['data-param-follow'] === 'temperature')[0]
+if (followBtn === undefined) {
+  console.error('smoke: detail parameter row must expose 「跟随默认」')
+  process.exit(1)
+}
+followBtn.props.onClick()
+await effectsRan()
+mutateCalls = writeCalls.slice(writesBefore).filter((call) => call.method === 'mutate')
+if (!mutateCalls.some((call) => call.ops.some((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['modelParams', 'demo/m2']) && !Object.prototype.hasOwnProperty.call(op.value, 'temperature')))) {
+  console.error('smoke: 「跟随默认」must remove the field from the model param bag — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
+  process.exit(1)
+}
+// 恢复此模型默认：三条 unset
+writesBefore = writeCalls.length
+const resetBtn = collectMatching(detailTree, (node) => node.$$ === 'component' && node.tag?.name === 'Button' && node.props?.['data-reset-model'] === 'demo/m2')[0]
+if (resetBtn === undefined) {
+  console.error('smoke: detail must expose 「恢复此模型默认」')
+  process.exit(1)
+}
+resetBtn.props.onClick()
+await effectsRan()
+mutateCalls = writeCalls.slice(writesBefore).filter((call) => call.method === 'mutate')
+const resetOps = mutateCalls.flatMap((call) => call.ops)
+for (const path of [['models', 'demo/m2'], ['modelParams', 'demo/m2'], ['modelInput', 'demo/m2']]) {
+  if (!resetOps.some((op) => op.op === 'unset' && JSON.stringify(op.path) === JSON.stringify(path))) {
+    console.error('smoke: reset-model must unset ' + path.join('.') + ' — got ' + JSON.stringify(resetOps))
+    process.exit(1)
+  }
+}
+// Esc 关闭（document 监听；冒烟桩提供 addEventListener 记录）
+if (typeof sandbox.document.addEventListener !== 'function') {
+  console.error('smoke: document.addEventListener stub missing — cannot assert Esc-close')
+  process.exit(1)
+}
+if ((sandbox.document.__listeners.keydown ?? []).length === 0) {
+  console.error('smoke: ModelDetail must register an Escape keydown listener while open')
+  process.exit(1)
+}
+for (const handler of sandbox.document.__listeners.keydown) handler({ key: 'Escape' })
+wbTree = renderWb({ narrow: false })
+if (findComponent(wbTree, 'ModelDetail') !== undefined) {
+  console.error('smoke: Escape must close the model detail panel')
+  process.exit(1)
+}
+// 窄屏展开行
+const reopen = collectMatching(wbTree, (node) => node.$$ === 'button' && node.props?.['data-model-open'] === 'demo/m2')[0]
+reopen.props.onClick({ stopPropagation() {} })
+wbTree = renderWb({ narrow: true })
+const inlineDetails = collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'ModelDetail' && node.props?.inline === true)
+if (inlineDetails.length !== 1) {
+  console.error('smoke: narrow layout must expand the detail inline under the selected row — got ' + inlineDetails.length)
+  process.exit(1)
+}
+if (typeof wbTree === 'object' && collectMatching(wbTree, (node) => node.$$ === 'aside').length !== 0) {
+  console.error('smoke: narrow layout must not render the wide right-hand aside')
+  process.exit(1)
+}
+// 容器窄判定（真实设置页 modal 约 559px、视口 1440px）：compact 命中时必须行内展开且不预留右列。
+wbTree = renderWb({ narrow: false, compact: true })
+const compactRoot = collectMatching(wbTree, (node) => typeof node.props?.className === 'string' && node.props.className.split(/\s+/).includes('rl-workbench'))[0]
+if (compactRoot === undefined || !compactRoot.props.className.split(/\s+/).includes('rl-workbench-narrow')
+  || !compactRoot.props.className.split(/\s+/).includes('rl-workbench-single')) {
+  console.error('smoke: container-compact workbench must switch to single-column + narrow rows — got ' + JSON.stringify(compactRoot?.props?.className))
+  process.exit(1)
+}
+if (collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'ModelDetail' && node.props?.inline === true).length !== 1
+  || collectMatching(wbTree, (node) => node.$$ === 'aside').length !== 0) {
+  console.error('smoke: container-compact workbench must inline the detail and omit the aside')
+  process.exit(1)
+}
+
+// ── 2s. 采样预设 + 默认参数写路径（defaults.preset + defaults.params）────────
+const presetEntry = findComponent(uxPage, 'PresetsPanel')
+if (presetEntry === undefined) {
+  console.error('smoke: PresetsPanel component missing from the defaults view')
+  process.exit(1)
+}
+resetHooks('PresetsPanel')
+const presetsTree = presetEntry[1](presetEntry[2])
+writesBefore = writeCalls.length
+const preciseBtn = collectMatching(presetsTree, (node) => node.$$ === 'button' && node.props?.['data-preset'] === 'precise')[0]
+if (preciseBtn === undefined) {
+  console.error('smoke: preset chips must render precise/balanced/creative buttons')
+  process.exit(1)
+}
+preciseBtn.props.onClick()
+await effectsRan()
+mutateCalls = writeCalls.slice(writesBefore).filter((call) => call.method === 'mutate')
+const presetOps = mutateCalls.flatMap((call) => call.ops)
+const presetSet = presetOps.find((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['defaults', 'preset']))
+const paramsSet = presetOps.find((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['defaults', 'params']))
+if (presetSet === undefined || presetSet.value !== 'precise'
+  || paramsSet === undefined || paramsSet.value.temperature !== 0.2 || paramsSet.value.topP !== 0.9 || paramsSet.value.topK !== 20) {
+  console.error('smoke: applying the precise preset must write defaults.preset/defaults.params (design §3) — got ' + JSON.stringify(presetOps))
+  process.exit(1)
+}
+writesBefore = writeCalls.length
+const defaultTemp = collectMatching(presetsTree, (node) => node.$$ === 'input' && node.props?.['data-default-param'] === 'temperature')[0]
+if (defaultTemp === undefined) {
+  console.error('smoke: default parameter controls missing from the presets panel')
+  process.exit(1)
+}
+defaultTemp.props.onChange({ target: { value: '0.9' } })
+await effectsRan()
+mutateCalls = writeCalls.slice(writesBefore).filter((call) => call.method === 'mutate')
+const customPreset = mutateCalls.flatMap((call) => call.ops)
+  .find((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['defaults', 'preset']))
+const customParams = mutateCalls.flatMap((call) => call.ops)
+  .find((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['defaults', 'params']))
+if (customPreset === undefined || customPreset.value !== 'custom' || customParams === undefined || customParams.value.temperature !== 0.9) {
+  console.error('smoke: editing a default parameter must switch to custom + write defaults.params — got ' + JSON.stringify(mutateCalls))
+  process.exit(1)
+}
+
+// ── 2s-2. 写失败：Toast + 回读宿主（UI 回滚）────────────────────────────────
+{
+  const originalUpdate = HOST_FACES.remoteSettings.update
+  const originalDescribe = API.settings.describe
+  let describeCalls = 0
+  API.settings.describe = async (...args) => { describeCalls += 1; return originalDescribe(...args) }
+  HOST_FACES.remoteSettings.update = async () => ({ ok: false, error: { message: '模拟写入失败' } })
+  const failPage = await readPage()
+  await effectsRan()
+  const describeBeforeClick = describeCalls
+  const failWbEntry = findComponent(failPage, 'ModelWorkbench')
+  resetHooks('ModelWorkbench')
+  const failWbTree = failWbEntry[1](failWbEntry[2])
+  const failImageBtn = collectMatching(failWbTree, (node) => node.$$ === 'button' && node.props?.['data-model-image'] === 'demo/m2')[0]
+  failImageBtn.props.onClick()
+  await sleep(30)
+  API.settings.describe = originalDescribe
+  HOST_FACES.remoteSettings.update = originalUpdate
+  if (describeCalls <= describeBeforeClick) {
+    console.error('smoke: failed write must re-read the host projection (UI rollback), but describe was not called again')
+    process.exit(1)
+  }
+  uxPage = await readPage()
+  const failToast = collectMatching(uxPage, (node) => node.$$ === 'component' && node.tag?.name === 'Toast')[0]
+  if (failToast === undefined || !String(failToast.props.message || '').includes('模拟写入失败')) {
+    console.error('smoke: failed write must surface a red Toast with the host error text — got ' + JSON.stringify(failToast?.props))
+    process.exit(1)
+  }
+  const rollbackEntry = findComponent(uxPage, 'ModelWorkbench')
+  resetHooks('ModelWorkbench')
+  const rollbackTree = rollbackEntry[1](rollbackEntry[2])
+  const rollbackImage = collectMatching(rollbackTree, (node) => node.$$ === 'button' && node.props?.['data-model-image'] === 'demo/m2')[0]
+  if (rollbackImage === undefined || rollbackImage.props['aria-pressed'] !== true) {
+    console.error('smoke: failed image write must roll the control back to the host projection (image still on)')
+    process.exit(1)
+  }
+}
+
+// ── 2t. 端点 404 降级：catalog 继续可用 + 诊断标注降级 ───────────────────────
+sandbox.fetch = async (url) => (url === '/reasoning-level-models'
+  ? { ok: false, status: 404, json: async () => ({ error: 'not found' }) }
+  : { ok: true, status: 200, json: async () => STATS_FIXTURE })
+stores.delete('ReasoningPage')
+stores.delete('ModelWorkbench')
+const fallbackPage = await readPage()
+const fallbackEntry = findComponent(fallbackPage, 'ModelWorkbench')
+if (fallbackEntry === undefined) {
+  console.error('smoke: workbench must still render when /reasoning-level-models is unavailable')
+  process.exit(1)
+}
+resetHooks('ModelWorkbench')
+const fallbackWb = fallbackEntry[1](fallbackEntry[2])
+const fallbackWbText = spanOf(fallbackWb)
+if (!fallbackWbText.includes('模型信息端点不可用') || !fallbackWbText.includes('demo/m1')) {
+  console.error('smoke: endpoint fallback must show a degraded notice and keep catalog rows — got ' + fallbackWbText.slice(0, 400))
+  process.exit(1)
+}
+const fallbackDiagEntry = findComponent(fallbackPage, 'DiagnosticsPanel')
+resetHooks('DiagnosticsPanel')
+const fallbackDiagTree = fallbackDiagEntry[1](fallbackDiagEntry[2])
+const fallbackDiagText = spanOf(fallbackDiagTree)
+const fallbackDiagChips = collectMatching(fallbackDiagTree, (node) => node.$$ === 'component' && node.tag?.name === 'LevelChip')
+  .map((node) => node.props.label)
+if (!fallbackDiagText.includes('模型信息: 不可用')
+  || !fallbackDiagText.includes('端点不可用，使用内置注册表降级')
+  || !fallbackDiagChips.includes('降级到会话模型目录')) {
+  console.error('smoke: diagnostics must label the registry/endpoint fallback when the endpoint is down — got ' + fallbackDiagText.slice(0, 400) + ' chips=' + JSON.stringify(fallbackDiagChips))
+  process.exit(1)
+}
+// 2t-2（隔离实例实测）：endpoint 404 + catalog 返回 0 模型 → 必须收尾为空态，不得永久 loading。
+const originalModelsLoader = API.llm.models
+API.llm.models = async () => ({ result: { ok: true, value: { groups: [] } } })
+stores.delete('ReasoningPage')
+stores.delete('ModelWorkbench')
+const emptyCatalogPage = await readPage()
+const emptyWbEntry = findComponent(emptyCatalogPage, 'ModelWorkbench')
+if (emptyWbEntry === undefined) {
+  console.error('smoke: workbench must render with an empty catalog + endpoint 404')
+  process.exit(1)
+}
+resetHooks('ModelWorkbench')
+const emptyWbTree = emptyWbEntry[1](emptyWbEntry[2])
+const emptyStates = collectMatching(emptyWbTree, (node) => node.$$ === 'component' && node.tag?.name === 'EmptyState')
+const emptyLoading = collectMatching(emptyWbTree, (node) => typeof node.props?.className === 'string' && node.props.className.includes('rl-loading'))
+if (!emptyStates.some((node) => node.props.title === '暂无可用模型')) {
+  console.error('smoke: empty catalog + 404 endpoint must end in an empty state — got ' + JSON.stringify(emptyStates.map((node) => node.props)))
+  process.exit(1)
+}
+if (emptyLoading.length > 0) {
+  console.error('smoke: workbench must not stay in loading after both model sources settled empty')
+  process.exit(1)
+}
+API.llm.models = originalModelsLoader
+
+// ── 2u. T-F2：端点 15s 超时 → AbortController.abort → catalog 降级收尾 ─────────
+// 不真等 15s：替换 window.setTimeout 捕获 15000ms 回调，fetch 桩在 abort 时 reject。
+{
+  const timeoutOriginalFetch = sandbox.fetch
+  const timeoutOriginalAbort = sandbox.AbortController
+  const timeoutOriginalSetTimeout = sandbox.window.setTimeout
+  const timeoutOriginalClearTimeout = sandbox.window.clearTimeout
+  let timeoutCallback = null
+  let timeoutDelay = 0
+  let abortCalls = 0
+  let endpointFetches = 0
+  class TimeoutAbortController {
+    constructor() {
+      const listeners = []
+      this.aborted = false
+      this.signal = {
+        aborted: false,
+        addEventListener(type, handler) { if (type === 'abort') listeners.push(handler) },
+        removeEventListener(type, handler) {
+          const index = listeners.indexOf(handler)
+          if (index >= 0) listeners.splice(index, 1)
+        },
+      }
+      this.listeners = listeners
+    }
+    abort() {
+      if (this.aborted) return
+      this.aborted = true
+      abortCalls += 1
+      this.signal.aborted = true
+      for (const listener of [...this.listeners]) listener()
+    }
+  }
+  sandbox.AbortController = TimeoutAbortController
+  sandbox.window.setTimeout = (fn, ms) => {
+    if (ms === 15000) { timeoutCallback = fn; timeoutDelay = ms; return 9001 }
+    return timeoutOriginalSetTimeout(fn, ms)
+  }
+  sandbox.window.clearTimeout = (id) => { if (id !== 9001) timeoutOriginalClearTimeout(id) }
+  sandbox.fetch = (url, init) => {
+    if (url === '/reasoning-level-models') {
+      endpointFetches += 1
+      return new Promise((resolve, reject) => {
+        if (init !== undefined && init.signal !== undefined && typeof init.signal.addEventListener === 'function') {
+          init.signal.addEventListener('abort', () => reject(new Error('aborted: timeout')))
+        }
+      })
+    }
+    return Promise.resolve({ ok: true, status: 200, json: async () => STATS_FIXTURE })
+  }
+  stores.delete('ReasoningPage')
+  stores.delete('ModelWorkbench')
+  await readPage()
+  await effectsRan()
+  if (timeoutCallback === null || timeoutDelay !== 15000) {
+    console.error('smoke: model-info endpoint must arm a 15000ms AbortController timeout — delay=' + timeoutDelay)
+    process.exit(1)
+  }
+  timeoutCallback()
+  await effectsRan()
+  await sleep(10)
+  if (abortCalls === 0) {
+    console.error('smoke: 15s timeout must call AbortController.abort()')
+    process.exit(1)
+  }
+  const timeoutPage = await readPage()
+  const timeoutWbEntry = findComponent(timeoutPage, 'ModelWorkbench')
+  if (timeoutWbEntry === undefined) {
+    console.error('smoke: workbench must render after the endpoint timeout falls back to catalog')
+    process.exit(1)
+  }
+  resetHooks('ModelWorkbench')
+  const timeoutWbTree = timeoutWbEntry[1](timeoutWbEntry[2])
+  const timeoutText = spanOf(timeoutWbTree)
+  if (!timeoutText.includes('模型信息端点不可用') || !timeoutText.includes('demo/m1')) {
+    console.error('smoke: timeout fallback must show the degraded notice and catalog rows — got ' + timeoutText.slice(0, 400))
+    process.exit(1)
+  }
+  if (collectMatching(timeoutWbTree, (node) => typeof node.props?.className === 'string' && node.props.className.includes('rl-loading')).length > 0) {
+    console.error('smoke: timeout fallback must not keep the loading state')
+    process.exit(1)
+  }
+  if (endpointFetches === 0) {
+    console.error('smoke: timeout test must actually call the model-info endpoint')
+    process.exit(1)
+  }
+  sandbox.fetch = timeoutOriginalFetch
+  sandbox.AbortController = timeoutOriginalAbort
+  sandbox.window.setTimeout = timeoutOriginalSetTimeout
+  sandbox.window.clearTimeout = timeoutOriginalClearTimeout
+}
+
+// ── 2v. T-F3：真实容器宽度驱动工作台布局（559 → narrow/inline；1200 → wide/aside）──
+// 给 host 根节点桩 getBoundingClientRect（模拟浏览器已布局的 DOM），让组件自己的
+// 挂载测量 + ResizeObserver 路径真实执行；不是手写窄布局 markup。
+{
+  const measuredOriginalResizeObserver = sandbox.ResizeObserver
+  const observedNodes = []
+  sandbox.ResizeObserver = class {
+    constructor(callback) { this.callback = callback }
+    observe(node) {
+      observedNodes.push(node)
+      if (node !== null && node !== undefined && typeof node.getBoundingClientRect === 'function') {
+        this.callback([{ target: node, contentRect: node.getBoundingClientRect() }], this)
+      }
+    }
+    disconnect() {}
+  }
+  const renderMeasured = (width) => {
+    measuredRefWidth = width
+    resetHooks('ModelWorkbench')
+    return realWorkbenchFn({ ...realWorkbenchProps, narrow: false })
+  }
+  const rootClassOf = (tree) => collectMatching(tree, (node) => typeof node.props?.className === 'string'
+    && node.props.className.split(/\s+/).includes('rl-workbench'))[0]?.props.className || ''
+  stores.delete('ModelWorkbench')
+  let measuredTree = renderMeasured(559)
+  await effectsRan()
+  measuredTree = renderMeasured(559)
+  await effectsRan()
+  const narrowRoot = rootClassOf(measuredTree)
+  if (!narrowRoot.split(/\s+/).includes('rl-workbench-narrow') || !narrowRoot.split(/\s+/).includes('rl-workbench-single')) {
+    console.error('smoke: T-F3 559px container must render the workbench single-column + narrow — got ' + JSON.stringify(narrowRoot))
+    process.exit(1)
+  }
+  const narrowOpen = collectMatching(measuredTree, (node) => node.$$ === 'button' && node.props?.['data-model-open'] === 'demo/m2')[0]
+  narrowOpen.props.onClick({ stopPropagation() {} })
+  measuredTree = renderMeasured(559)
+  await effectsRan()
+  const inlineDetails = collectMatching(measuredTree, (node) => node.$$ === 'component' && node.tag?.name === 'ModelDetail' && node.props?.inline === true)
+  if (inlineDetails.length !== 1 || collectMatching(measuredTree, (node) => node.$$ === 'aside').length !== 0) {
+    console.error('smoke: T-F3 559px container must inline the detail and omit the aside')
+    process.exit(1)
+  }
+  measuredTree = renderMeasured(1200)
+  await effectsRan()
+  measuredTree = renderMeasured(1200)
+  await effectsRan()
+  const wideRoot = rootClassOf(measuredTree)
+  if (wideRoot.split(/\s+/).includes('rl-workbench-narrow') || wideRoot.split(/\s+/).includes('rl-workbench-single')) {
+    console.error('smoke: T-F3 1200px container must return to the wide two-column workbench — got ' + JSON.stringify(wideRoot))
+    process.exit(1)
+  }
+  if (collectMatching(measuredTree, (node) => node.$$ === 'aside').length === 0
+    || collectMatching(measuredTree, (node) => node.$$ === 'component' && node.tag?.name === 'ModelDetail' && node.props?.inline !== true).length === 0) {
+    console.error('smoke: T-F3 1200px container must render the detail as a right-hand aside')
+    process.exit(1)
+  }
+  if (observedNodes.length === 0) {
+    console.error('smoke: T-F3 must exercise the component ResizeObserver/measurement path')
+    process.exit(1)
+  }
+  measuredRefWidth = 0
+  sandbox.ResizeObserver = measuredOriginalResizeObserver
+}
+
 // ── 3. MAINT-025 (b)：写路径经真实适配层驱动契约桩。旧冒烟从不触发写路径，
 // 契约桩不承重 = 防护形同虚设；此步让 update/mutate 的元数/形状校验真实执行
 // （调用形状 = 页面 change() 的实际形状，锚定 lib/client.js:766-772——页面不传
@@ -1224,5 +1999,51 @@ if (!textOf(enPage).includes('may still bill thinking')) {
 await pageElement.props.api.settings.update({ ns: 'llm-reasoning', patch: { level: 'high' } })
 await pageElement.props.api.settings.mutate({ ns: 'llm-reasoning', ops: [{ op: 'unset', path: ['models', 'demo/m1'] }] })
 
+// ── 4. 无 document 环境：ensureStyles 静默跳过，节点树照常完整渲染 ─────────────
+// （client-smoke 硬约束；用独立 vm 上下文重新加载模块，避免主沙箱的 document 桩。）
+const noDocSandbox = {
+  window: {
+    __ModuleLoader__: { load(def) { noDocSandbox.__loaded = def } },
+    setInterval: () => 0,
+    clearInterval: () => {},
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+  },
+  fetch: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+  AbortController,
+}
+vm.runInNewContext(source, noDocSandbox, { filename: 'lib/client.js' })
+const noDocClient = noDocSandbox.__loaded
+if (!noDocClient || noDocClient.id !== 'dsh-reasoning-level') {
+  console.error('smoke: client must load without a document global')
+  process.exit(1)
+}
+const noDocExports = noDocClient.factory((name) => {
+  if (name === 'react') return react
+  throw new Error('client required unexpected module: ' + name)
+})
+const noDocRegistered = []
+noDocExports.apply({
+  get: (name) => (name === 'remote.settings' ? HOST_FACES.remoteSettings
+    : name === 'remote.session' ? HOST_FACES.remoteSession
+    : name === 'locale' ? { getSnapshot: () => ({ active: 'zh' }) } : undefined),
+  slots: {
+    inject: (_slot, provider) => provider(),
+    register: (meta, render) => { noDocRegistered.push({ meta, render }); return () => {} },
+  },
+})
+stores.clear()
+const noDocPage = noDocRegistered[0].render({})
+resetHooks('ReasoningPage'); noDocPage.tag(noDocPage.props); await effectsRan()
+resetHooks('ReasoningPage'); const noDocTree = noDocPage.tag(noDocPage.props); await effectsRan()
+const noDocComponents = []
+collectComponents(noDocTree, noDocComponents)
+for (const name of ['PageHeader', 'TabBar', 'ModelWorkbench', 'StatsPanel', 'ModelDefaults']) {
+  if (!noDocComponents.some(([componentName]) => componentName === name)) {
+    console.error('smoke: no-document tree must still render ' + name + ' — got ' + JSON.stringify(noDocComponents.map(([n]) => n)))
+    process.exit(1)
+  }
+}
+
 for (const timer of timers) clearTimeout(timer)
-console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths, 1 settings section registered, 7 write entries + 3-arg update/mutate contract stubs exercised, FEAT-004 (search add / support matrix / stats toolbar / undo / persisted tri-state) + blocked attribution + FEAT-005 level comparison + R0 fixes (probe summary tri-state counts / single-key delete undo / thinking-unreported title / non-standard level compare / CSV per-level columns / recent 100-row window / en (default)+structured suggestion / off billing note) asserted')
+console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths; 1 settings section; 7 legacy write entries + UX-004 write paths (reasoning select / image toggle / modelParams set+follow / reset-model unsets / preset defaults / default-param custom) + 3-arg update/mutate contract stubs; UX-004 four views, aria-selected tabs, Esc detail close, narrow inline detail, endpoint-primary + 404 fallback + 15s timeout abort + empty-catalog empty state (no permanent loading), container-width 559/1200 layout, detail param coverage (topP/topK/maxTokens + 生效/预留 reasons), arrow matrix, no-document render; FEAT-004 (search add / support matrix / stats toolbar / undo / persisted tri-state) + blocked attribution + FEAT-005 level comparison + R0 fixes asserted')
