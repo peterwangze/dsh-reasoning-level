@@ -87,14 +87,20 @@ test('(UX-004/i18n-4) 工作台新增文案 key 在 zh/en 两侧都存在', () =
   const enKeys = new Set(topLevelKeys(langBlock.slice(enIndex)))
   const required = [
     'tabModels', 'tabDefaults', 'tabObservability', 'tabDiagnostics',
-    'searchModels', 'filterProvider', 'onlyOverridden', 'overrideBadge', 'inheritedBadge',
-    'reasoningLevelShort', 'reasoningSourceMeasured', 'multimodal', 'effectiveValue',
-    'paramsTitle', 'paramFollow', 'paramOverride', 'hostActive', 'hostReserved', 'hostReservedHint',
+    'searchModels', 'filterProvider', 'onlyOverridden',
+    'reasoningLevelShort', 'reasoningSourceMeasured', 'multimodal',
+    'paramsTitle', 'paramOverride', 'hostActive', 'hostReserved', 'hostReservedHint',
     'resetModel', 'presetPrecise', 'presetBalanced', 'presetCreative', 'presetCustom', 'presetsTitle',
     'defaultParams', 'defaultParamsHint', 'modelsEmpty', 'modelsEmptyHint',
+    'modelSource', 'followGlobal', 'custom', 'customSourceHint', 'rowFollowSummary', 'rowCustomSummary',
+    'badgeEffort', 'badgeImage', 'badgeParam', 'overrideSummary',
+    'effortFollowGlobal', 'defaultLevel', 'paramControlLabel', 'paramEffective', 'paramFollowGlobalAction', 'paramFollowHostAction',
+    'inputFollowCatalog', 'inputCustomText', 'inputCustomImage', 'sourceEffective',
+    'defaultsThinkingTitle', 'defaultsParamsTitle', 'overviewScope', 'unsetValue',
     'overviewThinkingDist', 'overviewMultimodal', 'overviewParamOverrides', 'overviewContract',
     'contractHealth', 'agentSelection', 'registryTitle', 'registryParams', 'registryModalities',
     'endpointStatus', 'probeState', 'observabilityHint', 'fallbackNotice', 'closeDetail',
+    'paramInvalidNumber', 'paramInvalidRange',
   ]
   for (const key of required) {
     assert.ok(zhKeys.has(key), `zh 字典缺 UX-004 key: ${key}`)

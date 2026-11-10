@@ -1316,6 +1316,30 @@ const collectMatching = (tree, predicate) => {
   return out
 }
 const spanOf = (tree) => { const text = []; collectText(tree, text); return text.join('|') }
+const paramFieldEntries = (tree) => collectMatching(tree, (node) => node.$$ === 'component' && node.tag?.name === 'ParamNumberField')
+const renderParamField = (entry, name) => {
+  resetHooks(name)
+  return entry.tag(entry.props)
+}
+const paramFieldInput = (tree, paramId, scope = 'model') => {
+  const entry = paramFieldEntries(tree).find((node) => node.props?.param?.id === paramId)
+  if (entry === undefined) return undefined
+  const fieldTree = renderParamField(entry, 'ParamNumberField:' + scope + ':' + paramId)
+  const input = collectMatching(fieldTree, (node) => node.$$ === 'input')[0]
+  return { entry, tree: fieldTree, input }
+}
+const rerenderParamField = (entry, paramId, scope = 'model') => {
+  resetHooks('ParamNumberField:' + scope + ':' + paramId)
+  return entry.tag(entry.props)
+}
+const typeParamField = (entry, paramId, value, scope = 'model') => {
+  const before = rerenderParamField(entry, paramId, scope)
+  const beforeInput = collectMatching(before, (node) => node.$$ === 'input')[0]
+  if (typeof beforeInput.props.onFocus === 'function') beforeInput.props.onFocus()
+  beforeInput.props.onChange({ target: { value } })
+  const after = rerenderParamField(entry, paramId, scope)
+  return { tree: after, input: collectMatching(after, (node) => node.$$ === 'input')[0] }
+}
 const tabEntryOf = (tree) => findComponent(tree, 'TabBar')
 const renderTabs = (tree) => {
   const entry = tabEntryOf(tree)
@@ -1372,7 +1396,7 @@ if ((panelOf(uxPage, 'defaults').props.hidden === false) !== true
 }
 const defaultsTitles = collectMatching(panelOf(uxPage, 'defaults'), (node) => node.$$ === 'component' && node.tag?.name === 'Card')
   .map((node) => node.props.title)
-if (!defaultsTitles.includes('全局设置') || !defaultsTitles.includes('采样预设')) {
+if (!defaultsTitles.some((title) => String(title).includes('全局默认思考强度')) || !defaultsTitles.some((title) => String(title).includes('全局默认采样参数（模型未覆盖时生效）'))) {
   console.error('smoke: defaults view must render the global card and sampling presets — titles=' + JSON.stringify(defaultsTitles))
   process.exit(1)
 }
@@ -1469,9 +1493,26 @@ if (providerGroups.length !== 2) {
   console.error('smoke: models must group by provider (2 groups) — got ' + providerGroups.length)
   process.exit(1)
 }
+// R2：PageHeader / Overview / 列表 toolbar 三处模型计数必须一致（canonical 去重后）。
 const wbText = spanOf(wbTree)
-if (!wbText.includes('温度 0.5*') || !wbText.includes('图像 ✓')) {
-  console.error('smoke: model row must summarise params (override *) and multimodal chips — got ' + wbText.slice(0, 400))
+const headerEntry = findComponent(uxPage, 'PageHeader')
+const overviewEntry = findComponent(uxPage, 'Overview')
+const toolbarEntry = findComponent(wbTree, 'Toolbar')
+const headerModelCount = headerEntry?.[2]?.modelCount
+const headerRouteCount = headerEntry?.[2]?.routeCount
+const overviewModelCount = overviewEntry?.[2]?.rows?.length
+const toolbarMeta = toolbarEntry?.[2]?.meta
+if (headerModelCount !== 3 || headerRouteCount !== 2 || overviewModelCount !== 3 || toolbarMeta !== '显示 3 / 3 个模型') {
+  console.error('smoke: PageHeader/Overview/list model counts must agree after router hiding — header=' + headerModelCount + '/' + headerRouteCount + ' overview=' + overviewModelCount + ' toolbar=' + JSON.stringify(toolbarMeta))
+  process.exit(1)
+}
+const appliedSpan = spanOf(uxPage)
+if (!/已应用：[^|]*\/ 3 个模型/.test(appliedSpan)) {
+  console.error('smoke: applied summary must use canonical model count (3) — got ' + appliedSpan.slice(0, 400))
+  process.exit(1)
+}
+if (!wbText.includes('温度 0.5') || !wbText.includes('图像 开')) {
+  console.error('smoke: model row must summarise the effective custom configuration — got ' + wbText.slice(0, 400))
   process.exit(1)
 }
 if (wbText.includes('温度 0.7*')) {
@@ -1517,54 +1558,42 @@ if (rowKeys().length !== 3) {
   console.error('smoke: turning 「仅显示已覆盖」off must restore every model — got ' + JSON.stringify(rowKeys()))
   process.exit(1)
 }
-// 行内思考强度写路径（models dict）
+// 行级配置来源：只有一个来源控件；custom 0 写，follow 一次清三处
 let writesBefore = writeCalls.length
-const inlineEffortEntry = collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'EffortSelect'
-  && node.props?.dataAttr === 'data-model-effort' && node.props?.row?.key === 'demo/m1')[0]
-if (inlineEffortEntry === undefined) {
-  console.error('smoke: model row must expose an inline reasoning select')
+const sourceSelects = collectMatching(wbTree, (node) => node.$$ === 'select' && node.props?.['data-model-source'] !== undefined)
+if (sourceSelects.length !== 3 || collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'EffortSelect').length !== 0
+  || collectMatching(wbTree, (node) => node.$$ === 'button' && node.props?.['data-model-image'] !== undefined).length !== 0) {
+  console.error('smoke: row must expose one source control and no inline effort/image editors — got sources=' + sourceSelects.length)
   process.exit(1)
 }
-const inlineEffortTree = inlineEffortEntry.tag(inlineEffortEntry.props)
-const effortSelect = collectMatching(inlineEffortTree, (node) => node.$$ === 'select')[0]
-if (effortSelect === undefined) {
-  console.error('smoke: inline reasoning control must render a native select')
-  process.exit(1)
-}
-effortSelect.props.onChange({ target: { value: 'max' } })
+const m1Source = sourceSelects.find((node) => node.props['data-model-source'] === 'demo/m1')
+m1Source.props.onChange({ target: { value: 'custom' } })
 await effectsRan()
-let uxUpdatePatches = writeCalls.slice(writesBefore).filter((call) => call.method === 'update').map((call) => call.patch)
-if (!uxUpdatePatches.some((patch) => patch.models !== undefined && patch.models['demo/m1'] === 'max')) {
-  console.error('smoke: inline reasoning select must write models[key] via settings.update — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
+if (writeCalls.length !== writesBefore) {
+  console.error('smoke: switching a row to Custom must not write')
   process.exit(1)
 }
-// 选择「跟随全局」= 清除模型级覆盖（mutate unset models/key）
+wbTree = renderWb({ narrow: false })
+if (!spanOf(wbTree).includes('切到「自定义」不写入')) {
+  console.error('smoke: switching to Custom must point the user to the details')
+  process.exit(1)
+}
+const m1SourceAfterCustom = collectMatching(wbTree, (node) => node.$$ === 'select' && node.props?.['data-model-source'] === 'demo/m1')[0]
+if (m1SourceAfterCustom === undefined || m1SourceAfterCustom.props.value !== 'follow') {
+  console.error('smoke: Custom is a hint only; the row source select must stay on Follow global until a dimension is overridden')
+  process.exit(1)
+}
 writesBefore = writeCalls.length
-const m2EffortEntry = collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name === 'EffortSelect'
-  && node.props?.dataAttr === 'data-model-effort' && node.props?.row?.key === 'demo/m2')[0]
-const m2EffortTree = m2EffortEntry.tag(m2EffortEntry.props)
-const m2EffortSelect = collectMatching(m2EffortTree, (node) => node.$$ === 'select')[0]
-m2EffortSelect.props.onChange({ target: { value: 'follow' } })
+const m2Source = collectMatching(wbTree, (node) => node.$$ === 'select' && node.props?.['data-model-source'] === 'demo/m2')[0]
+m2Source.props.onChange({ target: { value: 'follow' } })
 await effectsRan()
-if (!writeCalls.slice(writesBefore).some((call) => call.method === 'mutate'
-  && call.ops.some((op) => op.op === 'unset' && JSON.stringify(op.path) === JSON.stringify(['models', 'demo/m2'])))) {
-  console.error('smoke: choosing 「跟随全局」must clear the model-level override via mutate unset models/key — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
+const sourceMutates = writeCalls.slice(writesBefore).filter((call) => call.method === 'mutate')
+if (sourceMutates.length !== 1 || !['models', 'modelParams', 'modelInput'].every((field) =>
+  sourceMutates[0].ops.some((op) => op.op === 'unset' && JSON.stringify(op.path) === JSON.stringify([field, 'demo/m2'])))) {
+  console.error('smoke: Follow global must clear models/modelParams/modelInput in one mutate — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
   process.exit(1)
 }
-// 行内多模态写路径（modelInput）
-writesBefore = writeCalls.length
-const imageBtn = collectMatching(wbTree, (node) => node.$$ === 'button' && node.props?.['data-model-image'] === 'demo/m2')[0]
-if (imageBtn === undefined || imageBtn.props['aria-pressed'] !== true) {
-  console.error('smoke: model row image toggle must expose aria-pressed=true for effective image input')
-  process.exit(1)
-}
-imageBtn.props.onClick()
-await effectsRan()
-uxUpdatePatches = writeCalls.slice(writesBefore).filter((call) => call.method === 'update').map((call) => call.patch)
-if (!uxUpdatePatches.some((patch) => Array.isArray(patch.modelInput?.['demo/m2']) && patch.modelInput['demo/m2'].join(',') === 'text')) {
-  console.error('smoke: image toggle must write modelInput[key] via settings.update — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
-  process.exit(1)
-}
+wbTree = renderWb({ narrow: false })
 
 // ── 2r. 详情面板：Esc 关闭 / 参数跟随 / 参数写入 / 恢复模型默认 / 窄屏展开 ────
 const openButton = collectMatching(wbTree, (node) => node.$$ === 'button' && node.props?.['data-model-open'] === 'demo/m2')[0]
@@ -1588,11 +1617,15 @@ if (!detailText.includes('身份') || !detailText.includes('上下文') || !deta
   process.exit(1)
 }
 // T-F9：四个采样参数都必须有控件；生效/预留徽章 + 预留原因必须在详情里可见。
-const detailParamIds = collectMatching(detailTree, (node) => node.$$ === 'input' && typeof node.props?.['data-param'] === 'string')
-  .map((node) => node.props['data-param'])
+const detailParamIds = paramFieldEntries(detailTree).map((entry) => entry.props.param.id)
 for (const paramId of ['temperature', 'topP', 'topK', 'maxTokens']) {
   if (!detailParamIds.includes(paramId)) {
     console.error('smoke: detail must render a ' + paramId + ' control — got ' + JSON.stringify(detailParamIds))
+    process.exit(1)
+  }
+  const field = paramFieldInput(detailTree, paramId)
+  if (field === undefined || field.input === undefined) {
+    console.error('smoke: detail ' + paramId + ' field must render an input')
     process.exit(1)
   }
 }
@@ -1612,14 +1645,19 @@ for (const expected of ['宿主 0.2.2 的 GenerateOptions 无 topP 字段', '宿
     process.exit(1)
   }
 }
-// 参数写入（modelParams 整体 set）
+// 参数写入（modelParams 整体 set；R2：输入只在 blur/Enter 提交）
 writesBefore = writeCalls.length
-const tempInput = collectMatching(detailTree, (node) => node.$$ === 'input' && node.props?.['data-param'] === 'temperature')[0]
-if (tempInput === undefined) {
+const tempField = paramFieldInput(detailTree, 'temperature')
+if (tempField === undefined) {
   console.error('smoke: detail must render a temperature input')
   process.exit(1)
 }
-tempInput.props.onChange({ target: { value: '0.3' } })
+const typedTemp = typeParamField(tempField.entry, 'temperature', '0.3')
+if (writeCalls.length !== writesBefore) {
+  console.error('smoke: typing a param must not write before blur/Enter — got ' + JSON.stringify(writeCalls.slice(writesBefore)))
+  process.exit(1)
+}
+typedTemp.input.props.onBlur()
 await effectsRan()
 let mutateCalls = writeCalls.slice(writesBefore).filter((call) => call.method === 'mutate')
 if (!mutateCalls.some((call) => call.ops.some((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['modelParams', 'demo/m2']) && op.value.temperature === 0.3))) {
@@ -1699,6 +1737,315 @@ if (collectMatching(wbTree, (node) => node.$$ === 'component' && node.tag?.name 
   process.exit(1)
 }
 
+// ── 2r-2. R2 参数输入：draft 不写、blur/Enter 一次写、Escape/非法值不写 ──────
+const commitDetailEntry = findComponent(wbTree, 'ModelDetail')
+resetHooks('ModelDetail')
+const commitDetailTree = commitDetailEntry[1](commitDetailEntry[2])
+const commitField = paramFieldInput(commitDetailTree, 'temperature')
+let commitWritesBefore = writeCalls.length
+let typedCommit = typeParamField(commitField.entry, 'temperature', '0.')
+if (writeCalls.length !== commitWritesBefore) {
+  console.error('smoke: typing "0." must not write the model param')
+  process.exit(1)
+}
+typedCommit = typeParamField(commitField.entry, 'temperature', '0.7')
+if (writeCalls.length !== commitWritesBefore) {
+  console.error('smoke: typing "0.7" must not write before blur/Enter')
+  process.exit(1)
+}
+typedCommit.input.props.onBlur()
+await effectsRan()
+let commitMutates = writeCalls.slice(commitWritesBefore).filter((call) => call.method === 'mutate')
+if (commitMutates.length !== 1
+  || !commitMutates[0].ops.some((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['modelParams', 'demo/m2']) && op.value.temperature === 0.7)) {
+  console.error('smoke: blur must commit exactly one modelParams write — got ' + JSON.stringify(writeCalls.slice(commitWritesBefore)))
+  process.exit(1)
+}
+commitWritesBefore = writeCalls.length
+typedCommit = typeParamField(commitField.entry, 'temperature', '0.9')
+typedCommit.input.props.onKeyDown({ key: 'Enter', preventDefault() {} })
+await effectsRan()
+commitMutates = writeCalls.slice(commitWritesBefore).filter((call) => call.method === 'mutate')
+if (commitMutates.length !== 1 || !commitMutates[0].ops.some((op) => op.op === 'set' && op.value.temperature === 0.9)) {
+  console.error('smoke: Enter must commit exactly one modelParams write — got ' + JSON.stringify(writeCalls.slice(commitWritesBefore)))
+  process.exit(1)
+}
+typedCommit.input.props.onBlur()
+await effectsRan()
+if (writeCalls.length !== commitWritesBefore + 1) {
+  console.error('smoke: blur after Enter must not duplicate the modelParams write — got ' + JSON.stringify(writeCalls.slice(commitWritesBefore)))
+  process.exit(1)
+}
+commitWritesBefore = writeCalls.length
+typedCommit = typeParamField(commitField.entry, 'temperature', '1.1')
+typedCommit.input.props.onKeyDown({ key: 'Escape', preventDefault() {} })
+await effectsRan()
+if (writeCalls.length !== commitWritesBefore) {
+  console.error('smoke: Escape must cancel the draft without writing')
+  process.exit(1)
+}
+const escapedFieldTree = rerenderParamField(commitField.entry, 'temperature')
+const escapedInput = collectMatching(escapedFieldTree, (node) => node.$$ === 'input')[0]
+if (escapedInput.props.value !== '0.5') {
+  console.error('smoke: Escape must restore the committed value — got ' + JSON.stringify(escapedInput.props.value))
+  process.exit(1)
+}
+commitWritesBefore = writeCalls.length
+typedCommit = typeParamField(commitField.entry, 'temperature', 'abc')
+typedCommit.input.props.onBlur()
+await effectsRan()
+if (writeCalls.length !== commitWritesBefore) {
+  console.error('smoke: invalid model param must not write')
+  process.exit(1)
+}
+let invalidFieldTree = rerenderParamField(commitField.entry, 'temperature')
+let invalidInput = collectMatching(invalidFieldTree, (node) => node.$$ === 'input')[0]
+if (invalidInput.props['aria-invalid'] !== true || !spanOf(invalidFieldTree).includes('请输入有效数字')) {
+  console.error('smoke: invalid model param must set aria-invalid + inline error — got ' + JSON.stringify(invalidInput.props) + ' text=' + spanOf(invalidFieldTree))
+  process.exit(1)
+}
+typedCommit = typeParamField(commitField.entry, 'temperature', '9')
+typedCommit.input.props.onBlur()
+await effectsRan()
+if (writeCalls.length !== commitWritesBefore) {
+  console.error('smoke: out-of-range model param must not write')
+  process.exit(1)
+}
+invalidFieldTree = rerenderParamField(commitField.entry, 'temperature')
+invalidInput = collectMatching(invalidFieldTree, (node) => node.$$ === 'input')[0]
+if (invalidInput.props['aria-invalid'] !== true || !spanOf(invalidFieldTree).includes('需在 0–2 之间')) {
+  console.error('smoke: out-of-range model param must show the range error — got ' + spanOf(invalidFieldTree))
+  process.exit(1)
+}
+
+// ── 2r-3. R2b：隐藏 router，base 行内部同步全部 writeKeys ─────────────────────
+const hiddenCounts = [3, 2, 2, 2, 2, 2, 2]
+const hiddenProviders = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta']
+const hiddenModels = []
+let modelOrdinal = 0
+for (let index = 0; index < hiddenProviders.length; index += 1) {
+  for (let j = 0; j < hiddenCounts[index]; j += 1) {
+    modelOrdinal += 1
+    hiddenModels.push({
+      provider: hiddenProviders[index], model: 'm' + modelOrdinal, name: 'Model ' + modelOrdinal, kind: 'pi-ai',
+      input: { declared: ['text'], effective: ['text'], source: 'catalog' },
+      reasoning: { efforts: ['low', 'high'], defaultEffort: 'high' },
+      contextWindow: 200000, maxTokens: 128000,
+      configured: { reasoningEffort: null, input: null, params: {} },
+    })
+  }
+}
+for (const provider of ['alpha', 'beta']) {
+  for (const entry of hiddenModels.filter((item) => item.provider === provider)) {
+    hiddenModels.push({ ...entry, provider: provider + '-router' })
+  }
+}
+hiddenModels.push({
+  provider: 'alpha-router', model: 'ghost', name: 'Ghost', kind: 'pi-ai',
+  input: { declared: ['text'], effective: ['text'], source: 'catalog' },
+  reasoning: { efforts: ['low', 'high'], defaultEffort: 'high' },
+  contextWindow: 200000, maxTokens: 128000,
+  configured: { reasoningEffort: null, input: null, params: {} },
+})
+const hiddenFeed = {
+  version: 1, generatedAt: Date.now(),
+  routes: hiddenProviders.map((provider) => ({ provider, name: provider, kind: 'pi-ai' }))
+    .concat(['alpha', 'beta'].map((provider) => ({ provider: provider + '-router', name: provider + '-router', kind: 'pi-ai' }))),
+  models: hiddenModels,
+  params: MODEL_ENDPOINT_FIXTURE.params,
+  modalities: MODEL_ENDPOINT_FIXTURE.modalities,
+  contractHealth: { ok: true, missing: [] },
+}
+const hiddenValue = {
+  ...UX004_DESCRIBE.result.value.namespaces[0].value,
+  level: 'high',
+  models: { 'alpha/m1': 'high', 'alpha-router/m1': 'max' },
+  modelInput: { 'alpha/m1': ['text', 'image'], 'alpha-router/m1': ['text', 'image'] },
+  modelParams: { 'alpha/m1': { temperature: 0.2 }, 'alpha-router/m1': { temperature: 0.8 } },
+}
+const hiddenOriginalDescribe = API.settings.describe
+const hiddenOriginalFetch = sandbox.fetch
+API.settings.describe = async () => ({
+  result: {
+    ok: true,
+    value: {
+      namespaces: [
+        { ns: 'llm-reasoning', value: hiddenValue },
+        { ns: 'llm-pi-ai', value: { providers: { alpha: { reasoning: 'high', models: [] }, 'alpha-router': { reasoning: 'max', models: [] } } } },
+        ...UX004_DESCRIBE.result.value.namespaces.slice(1).filter((entry) => entry.ns !== 'llm-pi-ai'),
+      ],
+    },
+  },
+})
+sandbox.fetch = async (url) => (url === '/reasoning-level-models'
+  ? { ok: true, status: 200, json: async () => hiddenFeed }
+  : { ok: true, status: 200, json: async () => STATS_FIXTURE })
+stores.delete('ReasoningPage')
+stores.delete('ModelWorkbench')
+let hiddenPage = await readPage()
+const hiddenApplied = collectMatching(hiddenPage, (node) => typeof node.props?.className === 'string' && node.props.className.includes('rl-applied'))[0]
+const hiddenAppliedText = hiddenApplied === undefined ? '' : spanOf(hiddenApplied)
+if (hiddenApplied === undefined || hiddenAppliedText.includes('alpha-router') || hiddenAppliedText.includes('≠全局')
+  || hiddenApplied.props.className.includes('rl-applied-warn') || !hiddenAppliedText.includes('alpha=高')) {
+  console.error('smoke: applied summary must ignore -router providers and not warn on their level — got ' + JSON.stringify({ text: hiddenAppliedText, className: hiddenApplied?.props?.className }))
+  process.exit(1)
+}
+let hiddenWbEntry = findComponent(hiddenPage, 'ModelWorkbench')
+resetHooks('ModelWorkbench')
+let hiddenWb = hiddenWbEntry[1](hiddenWbEntry[2])
+const hiddenRows = collectMatching(hiddenWb, (node) => typeof node.props?.['data-model-key'] === 'string')
+if (hiddenRows.length !== 15 || new Set(hiddenRows.map((node) => node.props['data-model-key'].split('/')[0])).size !== 7) {
+  console.error('smoke: 7 providers × 15 models must render 15 rows / 7 groups after hiding routers — got ' + hiddenRows.length)
+  process.exit(1)
+}
+if (hiddenRows.some((node) => node.props['data-model-key'].includes('router') || node.props['data-model-route-keys'] !== undefined)) {
+  console.error('smoke: router rows/route attributes must stay hidden')
+  process.exit(1)
+}
+const alphaRow = hiddenRows.find((node) => node.props['data-model-key'] === 'alpha/m1')
+if (alphaRow.props['data-model-write-keys'] !== 'alpha/m1,alpha-router/m1'
+  || collectMatching(hiddenWb, (node) => node.props?.['data-model-key'] === 'alpha-router/ghost').length !== 0) {
+  console.error('smoke: base row must carry hidden router write keys and hide router-only models — got ' + JSON.stringify(alphaRow.props))
+  process.exit(1)
+}
+const hiddenHeader = findComponent(hiddenPage, 'PageHeader')
+if (hiddenHeader?.[2]?.routeCount !== 7 || hiddenHeader?.[2]?.modelCount !== 15) {
+  console.error('smoke: header must show 7 providers / 15 models — got ' + JSON.stringify(hiddenHeader?.[2]))
+  process.exit(1)
+}
+const hiddenToolbar = findComponent(hiddenWb, 'Toolbar')
+if (hiddenToolbar?.[2]?.meta !== '显示 15 / 15 个模型') {
+  console.error('smoke: toolbar must show 15 / 15 — got ' + JSON.stringify(hiddenToolbar?.[2]?.meta))
+  process.exit(1)
+}
+const hiddenOverview = findComponent(hiddenPage, 'Overview')
+resetHooks('Overview')
+const hiddenOverviewTree = hiddenOverview === undefined ? null : hiddenOverview[1](hiddenOverview[2])
+if (hiddenOverview?.[2]?.rows?.length !== 15 || hiddenOverviewTree === null || !spanOf(hiddenOverviewTree).includes('15 个模型 · 7 个模型提供商')) {
+  console.error('smoke: overview must state 15 models / 7 providers — got ' + (hiddenOverviewTree === null ? 'missing' : spanOf(hiddenOverviewTree).slice(0, 200)))
+  process.exit(1)
+}
+const hiddenFilter = collectMatching(hiddenWb, (node) => node.$$ === 'select' && node.props?.['data-provider-filter'] !== undefined)[0]
+const hiddenFilterOptions = collectMatching(hiddenFilter, (node) => node.$$ === 'option').map((node) => node.props.value)
+if (hiddenFilterOptions.join(',') !== 'all,alpha,beta,gamma,delta,epsilon,zeta,eta') {
+  console.error('smoke: provider filter must list exactly the 7 visible base providers — got ' + JSON.stringify(hiddenFilterOptions))
+  process.exit(1)
+}
+const hiddenText = spanOf(hiddenWb)
+for (const forbidden of ['路由版', '真实路由', '混合', '路由筛选', '全部路由', '各路由配置不一致', '已覆盖', '继承', '跟随默认', '服务商', '路由']) {
+  if (hiddenText.includes(forbidden)) {
+    console.error('smoke: router terminology must be hidden from the workbench — found ' + forbidden)
+    process.exit(1)
+  }
+}
+const hiddenPageText = spanOf(hiddenPage)
+if (hiddenPageText.includes('服务商') || hiddenPageText.includes('路由') || !hiddenPageText.includes('模型提供商')) {
+  console.error('smoke: visible copy must use 模型提供商 and contain no 服务商/路由 — got ' + hiddenPageText.slice(0, 500))
+  process.exit(1)
+}
+if (!spanOf(hiddenPage).includes('已应用：') || !/已应用：[^|]*\/ 15 个模型/.test(spanOf(hiddenPage))) {
+  console.error('smoke: applied summary must use 15 visible models')
+  process.exit(1)
+}
+// 行级 follow：一次 mutate 清三处（含隐藏 router key），undo 全恢复
+let hiddenWritesBefore = writeCalls.length
+const alphaSource = collectMatching(hiddenWb, (node) => node.$$ === 'select' && node.props?.['data-model-source'] === 'alpha/m1')[0]
+alphaSource.props.onChange({ target: { value: 'follow' } })
+await effectsRan()
+await sleep(20)
+const hiddenFollowMutates = writeCalls.slice(hiddenWritesBefore).filter((call) => call.method === 'mutate')
+if (hiddenFollowMutates.length !== 1 || !['alpha/m1', 'alpha-router/m1'].every((key) =>
+  ['models', 'modelInput', 'modelParams'].every((field) => hiddenFollowMutates[0].ops.some((op) => op.op === 'unset' && JSON.stringify(op.path) === JSON.stringify([field, key]))))) {
+  console.error('smoke: row follow must clear three dimensions for base + hidden router keys in one mutate — got ' + JSON.stringify(writeCalls.slice(hiddenWritesBefore)))
+  process.exit(1)
+}
+hiddenPage = await readPage()
+const hiddenFollowToast = findComponent(hiddenPage, 'Toast')
+if (hiddenFollowToast === undefined || hiddenFollowToast[2].actionLabel !== '撤销') {
+  console.error('smoke: row follow must offer undo')
+  process.exit(1)
+}
+hiddenWritesBefore = writeCalls.length
+hiddenFollowToast[2].onAction()
+await effectsRan()
+const hiddenUndoWrites = writeCalls.slice(hiddenWritesBefore)
+const hiddenUndoPatch = hiddenUndoWrites.find((call) => call.method === 'update' && call.patch?.models?.['alpha/m1'] === 'high' && call.patch?.models?.['alpha-router/m1'] === 'max')
+const hiddenUndoOps = hiddenUndoWrites.filter((call) => call.method === 'mutate').flatMap((call) => call.ops)
+if (hiddenUndoPatch === undefined || !['alpha/m1', 'alpha-router/m1'].every((key) =>
+  ['modelParams', 'modelInput'].every((field) => hiddenUndoOps.some((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify([field, key]))))) {
+  console.error('smoke: row follow undo must restore models + params + inputs for all write keys — got ' + JSON.stringify(hiddenUndoWrites))
+  process.exit(1)
+}
+hiddenPage = await readPage()
+hiddenWbEntry = findComponent(hiddenPage, 'ModelWorkbench')
+resetHooks('ModelWorkbench')
+hiddenWb = hiddenWbEntry[1](hiddenWbEntry[2])
+const hiddenOpen = collectMatching(hiddenWb, (node) => node.$$ === 'button' && node.props?.['data-model-open'] === 'alpha/m1')[0]
+hiddenOpen.props.onClick({ stopPropagation() {} })
+resetHooks('ModelWorkbench')
+hiddenWb = hiddenWbEntry[1](hiddenWbEntry[2])
+const hiddenDetailEntry = findComponent(hiddenWb, 'ModelDetail')
+resetHooks('ModelDetail')
+const hiddenDetail = hiddenDetailEntry[1](hiddenDetailEntry[2])
+const hiddenDetailText = spanOf(hiddenDetail)
+const hiddenEffortEntry = findComponent(hiddenDetail, 'EffortSelect')
+resetHooks('EffortSelect')
+const hiddenEffortTree = hiddenEffortEntry[1](hiddenEffortEntry[2])
+if (!hiddenDetailText.includes('思考强度') || !hiddenDetailText.includes('多模态') || !hiddenDetailText.includes('采样参数 · 温度')
+  || !/跟随全局思考强度（[^）]+）/.test(spanOf(hiddenEffortTree)) || !hiddenDetailText.includes('来源：')
+  || !/默认档位：[^|]+/.test(hiddenDetailText) || hiddenDetailText.includes('default:')
+  || !hiddenDetailText.includes('改为跟随全局默认（0.7）')
+  || (hiddenDetailText.split('改为跟随宿主默认').length - 1) !== 3
+  || hiddenDetailText.includes('已跟随宿主')
+  || !/跟随宿主目录（[^）]+）/.test(hiddenDetailText) || !hiddenDetailText.includes('自定义：仅文本')
+  || !hiddenDetailText.includes('自定义：文本 + 图像')) {
+  console.error('smoke: detail must label every dimension with source/effective — got ' + hiddenDetailText.slice(0, 500) + ' effort=' + (hiddenEffortTree === null ? 'missing' : spanOf(hiddenEffortTree)))
+  process.exit(1)
+}
+// 详情思考：写两 key
+hiddenWritesBefore = writeCalls.length
+const hiddenEffort = collectMatching(hiddenEffortTree, (node) => node.$$ === 'select')[0]
+hiddenEffort.props.onChange({ target: { value: 'max' } })
+await effectsRan()
+const hiddenEffortPatch = writeCalls.slice(hiddenWritesBefore).find((call) => call.method === 'update' && call.patch?.models?.['alpha/m1'] === 'max' && call.patch?.models?.['alpha-router/m1'] === 'max')
+if (hiddenEffortPatch === undefined) {
+  console.error('smoke: detail thinking level must write both base + hidden router keys')
+  process.exit(1)
+}
+// 详情多模态：跟随目录一次 unset 两 key；自定义 image 写两 key
+hiddenWritesBefore = writeCalls.length
+const hiddenInput = collectMatching(hiddenDetail, (node) => node.$$ === 'select' && node.props?.['data-detail-image'] !== undefined)[0]
+hiddenInput.props.onChange({ target: { value: 'follow' } })
+await effectsRan()
+const hiddenInputFollow = writeCalls.slice(hiddenWritesBefore).filter((call) => call.method === 'mutate').flatMap((call) => call.ops)
+if (!['alpha/m1', 'alpha-router/m1'].every((key) => hiddenInputFollow.some((op) => op.op === 'unset' && JSON.stringify(op.path) === JSON.stringify(['modelInput', key])))) {
+  console.error('smoke: multimodal follow must unset modelInput for all write keys — got ' + JSON.stringify(hiddenInputFollow))
+  process.exit(1)
+}
+hiddenWritesBefore = writeCalls.length
+hiddenInput.props.onChange({ target: { value: 'image' } })
+await effectsRan()
+const hiddenInputPatch = writeCalls.slice(hiddenWritesBefore).find((call) => call.method === 'update' && call.patch?.modelInput?.['alpha/m1']?.join(',') === 'text,image' && call.patch?.modelInput?.['alpha-router/m1']?.join(',') === 'text,image')
+if (hiddenInputPatch === undefined) {
+  console.error('smoke: multimodal custom must write both keys')
+  process.exit(1)
+}
+// 详情参数：写两 key
+const hiddenTempField = paramFieldInput(hiddenDetail, 'temperature')
+hiddenWritesBefore = writeCalls.length
+const hiddenTyped = typeParamField(hiddenTempField.entry, 'temperature', '0.4')
+hiddenTyped.input.props.onBlur()
+await effectsRan()
+const hiddenParamOps = writeCalls.slice(hiddenWritesBefore).filter((call) => call.method === 'mutate').flatMap((call) => call.ops)
+if (!['alpha/m1', 'alpha-router/m1'].every((key) => hiddenParamOps.some((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['modelParams', key]) && op.value.temperature === 0.4))) {
+  console.error('smoke: detail parameter must write both keys — got ' + JSON.stringify(hiddenParamOps))
+  process.exit(1)
+}
+API.settings.describe = hiddenOriginalDescribe
+sandbox.fetch = hiddenOriginalFetch
+stores.delete('ReasoningPage')
+stores.delete('ModelWorkbench')
+uxPage = await readPage()
 // ── 2s. 采样预设 + 默认参数写路径（defaults.preset + defaults.params）────────
 const presetEntry = findComponent(uxPage, 'PresetsPanel')
 if (presetEntry === undefined) {
@@ -1725,20 +2072,52 @@ if (presetSet === undefined || presetSet.value !== 'precise'
   process.exit(1)
 }
 writesBefore = writeCalls.length
-const defaultTemp = collectMatching(presetsTree, (node) => node.$$ === 'input' && node.props?.['data-default-param'] === 'temperature')[0]
-if (defaultTemp === undefined) {
+const defaultTempField = paramFieldInput(presetsTree, 'temperature', 'defaults')
+if (defaultTempField === undefined) {
   console.error('smoke: default parameter controls missing from the presets panel')
   process.exit(1)
 }
-defaultTemp.props.onChange({ target: { value: '0.9' } })
+typeParamField(defaultTempField.entry, 'temperature', '0.', 'defaults')
+if (writeCalls.length !== writesBefore) {
+  console.error('smoke: typing "0." in a default param must not write')
+  process.exit(1)
+}
+const typedDefault = typeParamField(defaultTempField.entry, 'temperature', '0.8', 'defaults')
+if (writeCalls.length !== writesBefore) {
+  console.error('smoke: typing "0.8" in a default param must not write before blur/Enter')
+  process.exit(1)
+}
+typedDefault.input.props.onBlur()
 await effectsRan()
 mutateCalls = writeCalls.slice(writesBefore).filter((call) => call.method === 'mutate')
 const customPreset = mutateCalls.flatMap((call) => call.ops)
   .find((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['defaults', 'preset']))
 const customParams = mutateCalls.flatMap((call) => call.ops)
   .find((op) => op.op === 'set' && JSON.stringify(op.path) === JSON.stringify(['defaults', 'params']))
-if (customPreset === undefined || customPreset.value !== 'custom' || customParams === undefined || customParams.value.temperature !== 0.9) {
-  console.error('smoke: editing a default parameter must switch to custom + write defaults.params — got ' + JSON.stringify(mutateCalls))
+if (customPreset === undefined || customPreset.value !== 'custom' || customParams === undefined || customParams.value.temperature !== 0.8) {
+  console.error('smoke: editing a default parameter must switch to custom + write defaults.params — got ' + JSON.stringify(mutateCalls) + ' writes=' + JSON.stringify(writeCalls.slice(writesBefore)))
+  process.exit(1)
+}
+writesBefore = writeCalls.length
+const escapedDefault = typeParamField(defaultTempField.entry, 'temperature', '1.1', 'defaults')
+escapedDefault.input.props.onKeyDown({ key: 'Escape', preventDefault() {} })
+await effectsRan()
+if (writeCalls.length !== writesBefore) {
+  console.error('smoke: Escape in a default param must not write')
+  process.exit(1)
+}
+writesBefore = writeCalls.length
+const invalidDefault = typeParamField(defaultTempField.entry, 'temperature', 'abc', 'defaults')
+invalidDefault.input.props.onBlur()
+await effectsRan()
+if (writeCalls.length !== writesBefore) {
+  console.error('smoke: invalid default param must not write')
+  process.exit(1)
+}
+const invalidDefaultTree = rerenderParamField(defaultTempField.entry, 'temperature', 'defaults')
+const invalidDefaultInput = collectMatching(invalidDefaultTree, (node) => node.$$ === 'input')[0]
+if (invalidDefaultInput.props['aria-invalid'] !== true || !spanOf(invalidDefaultTree).includes('请输入有效数字')) {
+  console.error('smoke: invalid default param must set aria-invalid + inline error — got ' + spanOf(invalidDefaultTree))
   process.exit(1)
 }
 
@@ -1755,8 +2134,15 @@ if (customPreset === undefined || customPreset.value !== 'custom' || customParam
   const failWbEntry = findComponent(failPage, 'ModelWorkbench')
   resetHooks('ModelWorkbench')
   const failWbTree = failWbEntry[1](failWbEntry[2])
-  const failImageBtn = collectMatching(failWbTree, (node) => node.$$ === 'button' && node.props?.['data-model-image'] === 'demo/m2')[0]
-  failImageBtn.props.onClick()
+  const failOpen = collectMatching(failWbTree, (node) => node.$$ === 'button' && node.props?.['data-model-open'] === 'demo/m2')[0]
+  failOpen.props.onClick({ stopPropagation() {} })
+  resetHooks('ModelWorkbench')
+  const failWbAfterOpen = failWbEntry[1](failWbEntry[2])
+  const failDetailEntry = findComponent(failWbAfterOpen, 'ModelDetail')
+  resetHooks('ModelDetail')
+  const failDetailTree = failDetailEntry[1](failDetailEntry[2])
+  const failImageSelect = collectMatching(failDetailTree, (node) => node.$$ === 'select' && node.props?.['data-detail-image'] !== undefined)[0]
+  failImageSelect.props.onChange({ target: { value: 'image' } })
   await sleep(30)
   API.settings.describe = originalDescribe
   HOST_FACES.remoteSettings.update = originalUpdate
@@ -1773,9 +2159,12 @@ if (customPreset === undefined || customPreset.value !== 'custom' || customParam
   const rollbackEntry = findComponent(uxPage, 'ModelWorkbench')
   resetHooks('ModelWorkbench')
   const rollbackTree = rollbackEntry[1](rollbackEntry[2])
-  const rollbackImage = collectMatching(rollbackTree, (node) => node.$$ === 'button' && node.props?.['data-model-image'] === 'demo/m2')[0]
-  if (rollbackImage === undefined || rollbackImage.props['aria-pressed'] !== true) {
-    console.error('smoke: failed image write must roll the control back to the host projection (image still on)')
+  const rollbackDetailEntry = findComponent(rollbackTree, 'ModelDetail')
+  resetHooks('ModelDetail')
+  const rollbackDetailTree = rollbackDetailEntry[1](rollbackDetailEntry[2])
+  const rollbackImage = collectMatching(rollbackDetailTree, (node) => node.$$ === 'select' && node.props?.['data-detail-image'] !== undefined)[0]
+  if (rollbackImage === undefined || rollbackImage.props.value !== 'image') {
+    console.error('smoke: failed image write must roll the control back to the host projection (image still on) — got ' + JSON.stringify(rollbackImage?.props?.value))
     process.exit(1)
   }
 }
@@ -2046,4 +2435,4 @@ for (const name of ['PageHeader', 'TabBar', 'ModelWorkbench', 'StatsPanel', 'Mod
 }
 
 for (const timer of timers) clearTimeout(timer)
-console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths; 1 settings section; 7 legacy write entries + UX-004 write paths (reasoning select / image toggle / modelParams set+follow / reset-model unsets / preset defaults / default-param custom) + 3-arg update/mutate contract stubs; UX-004 four views, aria-selected tabs, Esc detail close, narrow inline detail, endpoint-primary + 404 fallback + 15s timeout abort + empty-catalog empty state (no permanent loading), container-width 559/1200 layout, detail param coverage (topP/topK/maxTokens + 生效/预留 reasons), arrow matrix, no-document render; FEAT-004 (search add / support matrix / stats toolbar / undo / persisted tri-state) + blocked attribution + FEAT-005 level comparison + R0 fixes asserted')
+console.log('client-smoke: OK — ' + rendered + ' components rendered through loading and loaded paths; 1 settings section; 7 legacy write entries + UX-004 write paths (reasoning select / image toggle / modelParams set+follow / reset-model unsets / preset defaults / default-param custom) + 3-arg update/mutate contract stubs; UX-004 four views, aria-selected tabs, Esc detail close, narrow inline detail, endpoint-primary + 404 fallback + 15s timeout abort + empty-catalog empty state (no permanent loading), container-width 559/1200 layout, detail param coverage (topP/topK/maxTokens + 生效/预留 reasons), arrow matrix, R2 commit-on-blur/Enter + Escape/invalid no-write + R2b hidden router (15 rows/7 providers, 0 router terms, writeKeys sync, row source + dimension detail, undo), no-document render; FEAT-004 (search add / support matrix / stats toolbar / undo / persisted tri-state) + blocked attribution + FEAT-005 level comparison + R0 fixes asserted')

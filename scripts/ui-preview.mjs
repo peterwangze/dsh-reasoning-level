@@ -46,13 +46,14 @@ const PARAMS = [
 
 // ── 模型列表：4 个 provider × 多模型（长列表滚动/筛选场景）──────────────────
 const MODELS = []
-const providers = ['zai-coding-cn', 'command-code', 'craze-code', 'deepseek-official']
+const providers = ['zai-coding-cn', 'command-code', 'craze-code', 'deepseek-official', 'openai-codex', 'kimi', 'qwen']
 const names = ['glm-5.3', 'glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4.1-pro', 'gpt-6.1-sol', 'claude-opus-5', 'kimi-k3', 'qwen4-max']
-for (let index = 0; index < 24; index += 1) {
+for (let index = 0; index < 15; index += 1) {
   const provider = providers[index % providers.length]
   const base = names[index % names.length]
   MODELS.push({
     key: provider + '/' + base + (index >= names.length ? '-v' + Math.floor(index / names.length) : ''),
+    provider,
     name: base.toUpperCase() + (index >= names.length ? ' · ' + (Math.floor(index / names.length) + 1) : ''),
     image: index % 3 === 0,
     override: index % 5 === 0,
@@ -66,7 +67,7 @@ const selectedIndex = 1
 
 function effortSelect(model) {
   return `<select class="rl-select" aria-label="思考强度 · ${escaped(model.key)}">
-    <option value="follow"${model.effort === 'follow' ? ' selected' : ''}>跟随全局</option>
+    <option value="follow">跟随全局思考强度（最大）</option>
     ${LEVELS.map((label, index) => `<option${model.effort === ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'][index] ? ' selected' : ''}>${label}</option>`).join('')}
   </select>`
 }
@@ -76,6 +77,9 @@ function paramSummary(model) {
 }
 
 function modelRow(model, withInlineDetail) {
+  const summary = model.override
+    ? '自定义 · 思考 ' + (model.effort === 'follow' ? '高' : (model.effort === 'max' ? '最大' : '高')) + ' · 温度 ' + model.temp
+    : '全局 · 最大 · 温度 0.7'
   const row = `
   <div class="rl-model-row${withInlineDetail ? ' rl-model-row-active' : ''}" data-model-key="${escaped(model.key)}">
     <div class="rl-model-ident">
@@ -83,16 +87,14 @@ function modelRow(model, withInlineDetail) {
         <span class="rl-model-name">${escaped(model.name)}</span>
         <span class="rl-model-id">${escaped(model.key)}</span>
       </button>
-      <div class="rl-chips">${model.override ? chip('已覆盖', 'primary') : chip('继承')}</div>
     </div>
-    <div class="rl-model-cell rl-model-effort">${effortSelect(model)}</div>
-    <div class="rl-model-cell rl-model-inputs">
-      <div class="rl-chips">
-        <span class="rl-chip">🔒 文本</span>
-        <button type="button" class="rl-chip rl-chip-btn" aria-pressed="${model.image ? 'true' : 'false'}">图像 ${model.image ? '✓' : '—'}</button>
-      </div>
+    <div class="rl-model-cell rl-model-source">
+      <select class="rl-select" aria-label="配置来源 · ${escaped(model.key)}">
+        <option${model.override ? '' : ' selected'}>跟随全局</option>
+        <option${model.override ? ' selected' : ''}>自定义</option>
+      </select>
     </div>
-    <div class="rl-model-params">${paramSummary(model)}</div>
+    <div class="rl-model-summary" title="${escaped(summary)}">${escaped(summary)}</div>
   </div>`
   return row + (withInlineDetail ? inlineDetail(model) : '')
 }
@@ -101,12 +103,12 @@ function paramRow(param) {
   return `
   <div class="rl-param-row">
     <div class="rl-param-main">
-      <div class="rl-param-label">${param.label} <span class="rl-chip ${param.active ? 'rl-chip-success' : 'rl-chip-warning'}">${param.active ? '生效' : '预留'}</span></div>
-      <div class="rl-field-hint" title="${escaped(param.hint)}">生效：${param.value}（${param.active ? '模型覆盖' : '预留，不会发送到网关'}）</div>
+      <div class="rl-param-label">采样参数 · ${param.label} <span class="rl-chip ${param.active ? 'rl-chip-success' : 'rl-chip-warning'}">${param.active ? '生效' : '预留'}</span></div>
+      <div class="rl-field-hint" title="${escaped(param.hint)}">生效值 ${param.value}（来源：模型覆盖）</div>
     </div>
     <div class="rl-param-controls">
-      <input type="number" class="rl-input-num" value="${param.value}" aria-label="${param.label}">
-      <button type="button" class="rl-btn rl-btn-ghost rl-btn-sm" aria-pressed="false">跟随默认</button>
+      <input type="text" inputmode="decimal" class="rl-input-num" value="${param.value}" aria-label="${param.label}">
+      <button type="button" class="rl-btn rl-btn-ghost rl-btn-sm" aria-pressed="false">改为跟随全局默认（${param.value}）</button>
     </div>
   </div>`
 }
@@ -118,7 +120,7 @@ function detailBody(model) {
       <h4 class="rl-detail-title">${escaped(model.name)}</h4>
       <div class="rl-model-id">${escaped(model.key)}</div>
     </div>
-    <div class="rl-card-actions">${chip('已覆盖', 'primary')}<button type="button" class="rl-btn rl-btn-ghost rl-btn-sm" aria-label="关闭详情">✕</button></div>
+    <div class="rl-card-actions">${chip('该模型有覆盖：思考 高', 'primary')}<button type="button" class="rl-btn rl-btn-ghost rl-btn-sm" aria-label="关闭详情">✕</button></div>
   </div>
   <div class="rl-detail-grid">
     <div class="rl-kv"><div class="rl-kv-label">身份</div><div class="rl-kv-value">${escaped(model.key)}</div></div>
@@ -128,12 +130,16 @@ function detailBody(model) {
   <div class="rl-field">
     <div class="rl-field-label">思考强度</div>
     ${effortSelect(model)}
-    <div class="rl-field-hint">模型信息端点 · 不支持档位禁用并注明来源</div>
+    <div class="rl-field-hint">来源：自定义 · 生效值：高</div>
   </div>
   <div class="rl-field">
     <div class="rl-field-label">多模态</div>
-    <div class="rl-chips"><span class="rl-chip">🔒 文本</span><button type="button" class="rl-chip rl-chip-btn" aria-pressed="${model.image ? 'true' : 'false'}">图像 ${model.image ? '✓' : '—'}</button></div>
-    <div class="rl-field-hint">生效值：Text${model.image ? ' + Image' : ''} ← 配置覆盖</div>
+    <select class="rl-select" aria-label="多模态 · ${escaped(model.key)}">
+      <option>跟随目录（文本）</option>
+      <option>自定义 · 仅文本</option>
+      <option selected>自定义 · 文本 + 图像</option>
+    </select>
+    <div class="rl-field-hint">来源：自定义 · 生效值：文本 + 图像</div>
   </div>
   <div class="rl-field">
     <div class="rl-field-label">采样参数</div>
@@ -155,14 +161,17 @@ function asideDetail(model) {
 function providerGroups(compact) {
   const groups = new Map()
   for (const model of MODELS) {
-    if (!groups.has(model.key.split('/')[0])) groups.set(model.key.split('/')[0], [])
-    groups.get(model.key.split('/')[0]).push(model)
+    const provider = model.provider || model.key.split('/')[0]
+    if (!groups.has(provider)) groups.set(provider, [])
+    groups.get(provider).push(model)
   }
-  return [...groups.entries()].map(([provider, models]) => `
+  return [...groups.entries()].map(([provider, models]) => {
+    return `
     <div class="rl-provider" data-provider="${escaped(provider)}">
       <div class="rl-provider-head"><span>${escaped(provider)}</span><span class="rl-provider-count">${models.length} 个模型</span></div>
       ${models.map((model) => modelRow(model, compact && model.key === MODELS[selectedIndex].key)).join('')}
-    </div>`).join('')
+    </div>`
+  }).join('')
 }
 
 function workbench(compact) {
@@ -172,11 +181,11 @@ function workbench(compact) {
       <div class="rl-status rl-status-warn">模型信息端点不可用，已降级使用会话模型目录（部分字段不可用）</div>
       <div class="rl-toolbar">
         <div class="rl-toolbar-main">
-          <div class="rl-search-wrap rl-search-grow"><input type="search" class="rl-search" placeholder="搜索模型（名称 / provider / id）"></div>
-          <select class="rl-select" aria-label="路由筛选"><option>全部路由</option>${providers.map((p) => `<option>${p}</option>`).join('')}</select>
-          <button type="button" class="rl-btn rl-btn-secondary rl-btn-sm" aria-pressed="false">仅显示已覆盖</button>
+          <div class="rl-search-wrap rl-search-grow"><input type="search" class="rl-search" placeholder="搜索模型（名称 / 模型提供商 / id）"></div>
+          <select class="rl-select" aria-label="模型提供商筛选"><option>全部模型提供商</option>${providers.map((p) => `<option>${p}</option>`).join('')}</select>
+          <button type="button" class="rl-btn rl-btn-secondary rl-btn-sm" aria-pressed="false">仅显示自定义</button>
         </div>
-        <span class="rl-toolbar-meta">显示 24 / 24 个模型</span>
+        <span class="rl-toolbar-meta">显示 ${MODELS.length} / ${MODELS.length} 个模型</span>
       </div>
       ${providerGroups(compact)}
     </div>
@@ -188,7 +197,7 @@ function defaultsView() {
   return `
   <div class="rl-cards">
     <section class="rl-card">
-      <h3 class="rl-card-title">全局设置</h3>
+      <h3 class="rl-card-title">全局默认思考强度</h3>
       <div class="rl-switch-field">
         <div class="rl-switch-line"><span class="rl-switch-text">启用统一默认推理等级</span><button type="button" class="rl-switch rl-switch-on" role="switch" aria-checked="true"><span class="rl-switch-thumb"></span></button></div>
         <div class="rl-switch-hint">新调用将使用默认等级</div>
@@ -198,32 +207,32 @@ function defaultsView() {
         <div class="rl-seg" role="radiogroup" aria-label="默认推理等级（全局）">
           ${LEVELS.map((label, index) => `<button type="button" role="radio" aria-checked="${index === 4}" class="rl-seg-item${index === 4 ? ' rl-seg-checked' : ''}"><span class="rl-seg-name">${label}</span><span class="rl-seg-sub">${['不思考', '一笔带过', '轻量推理', '常规推理', '深度推理', '更深推理', '最深推理'][index]}</span></button>`).join('')}
         </div>
-        <div class="rl-impact"><span class="rl-impact-text">影响预览：24 个模型支持「高」</span></div>
+        <div class="rl-impact"><span class="rl-impact-text">影响预览：15 个模型支持「高」</span></div>
       </div>
       <div class="rl-switch-field">
         <div class="rl-switch-line"><span class="rl-switch-text">同步默认 agent 模型等级</span><button type="button" class="rl-switch" role="switch" aria-checked="false"><span class="rl-switch-thumb"></span></button></div>
         <div class="rl-switch-hint">开启后全局等级变化会同步写入 agent-default-model.reasoningEffort</div>
       </div>
-      <div class="rl-applied">已应用：zai-coding-cn=高 / 24 个模型 · DeepSeek 官方：设置为 高</div>
+      <div class="rl-applied">已应用：zai-coding-cn=高 / 15 个模型 · DeepSeek 官方：设置为 高</div>
     </section>
     <section class="rl-card">
-      <h3 class="rl-card-title">采样预设</h3>
+      <h3 class="rl-card-title">全局默认采样参数（模型未覆盖时生效）</h3>
       <div class="rl-preset-row" role="group" aria-label="采样预设">
         <button type="button" class="rl-preset" aria-pressed="false">精确</button>
         <button type="button" class="rl-preset rl-preset-active" aria-pressed="true">均衡</button>
         <button type="button" class="rl-preset" aria-pressed="false">创意</button>
         <span class="rl-preset rl-preset-custom">自定义</span>
       </div>
-      <div class="rl-field-hint">一键套用为全局默认参数；模型级覆盖始终优先。</div>
-      <div class="rl-subtitle">默认参数</div>
+      <div class="rl-field-hint">预设作用于全局默认参数；模型覆盖始终优先。</div>
+      <div class="rl-subtitle">全局默认采样参数（模型未覆盖时生效）</div>
       ${PARAMS.map((param) => `
       <div class="rl-param-row">
         <div class="rl-param-main">
-          <div class="rl-param-label">${param.label} <span class="rl-chip ${param.active ? 'rl-chip-success' : 'rl-chip-warning'}">${param.active ? '生效' : '预留'}</span></div>
-          <div class="rl-field-hint">${param.active ? '生效：' + param.value + '（全局默认）' : escaped(param.hint)}</div>
+          <div class="rl-param-label">采样参数 · ${param.label} <span class="rl-chip ${param.active ? 'rl-chip-success' : 'rl-chip-warning'}">${param.active ? '生效' : '预留'}</span></div>
+          <div class="rl-field-hint">生效值 ${param.value}（来源：全局默认）</div>
         </div>
         <div class="rl-param-controls">
-          <input type="number" class="rl-input-num" value="${param.value}" aria-label="${param.label}">
+          <input type="text" inputmode="decimal" class="rl-input-num" value="${param.value}" aria-label="采样参数 · ${param.label}">
           <button type="button" class="rl-btn rl-btn-secondary rl-btn-sm">沿用宿主默认</button>
         </div>
       </div>`).join('')}
@@ -287,17 +296,17 @@ function pageHtml({ active, panel }) {
     <div class="rl-pills">
       <span class="rl-pill rl-pill-ok"><span class="rl-pill-dot"></span>启用中</span>
       <span class="rl-pill rl-pill-primary"><span class="rl-pill-dot"></span>默认：高</span>
-      <span class="rl-pill rl-pill-muted"><span class="rl-pill-dot"></span>生效 4 路由 · 24 模型</span>
+      <span class="rl-pill rl-pill-muted"><span class="rl-pill-dot"></span>生效 7 个模型提供商 · 15 个模型</span>
     </div>
   </header>
   <div class="rl-stats-grid">
-    <div class="rl-stat"><div class="rl-stat-label">思考档位分布</div><div class="rl-stat-value">高</div><div class="rl-stat-sub">5 / 24 模型已覆盖</div><div class="rl-scale" aria-hidden="true">${LEVELS.map((_, index) => `<span class="rl-scale-seg${index <= 4 ? ' rl-scale-seg-on' : ''}"></span>`).join('')}</div></div>
-    <div class="rl-stat"><div class="rl-stat-label">多模态启用</div><div class="rl-stat-value">8</div><div class="rl-stat-sub">8 / 24 模型启用图像输入</div></div>
-    <div class="rl-stat"><div class="rl-stat-label">参数覆盖</div><div class="rl-stat-value">5</div><div class="rl-stat-sub">5 个模型覆盖 · 3 项全局默认</div></div>
+    <div class="rl-stat"><div class="rl-stat-label">思考档位分布</div><div class="rl-stat-value">高</div><div class="rl-stat-sub">5 / 15 模型自定义</div><div class="rl-scale" aria-hidden="true">${LEVELS.map((_, index) => `<span class="rl-scale-seg${index <= 4 ? ' rl-scale-seg-on' : ''}"></span>`).join('')}</div></div>
+    <div class="rl-stat"><div class="rl-stat-label">多模态启用</div><div class="rl-stat-value">8</div><div class="rl-stat-sub">8 / 15 模型启用图像输入</div></div>
+    <div class="rl-stat"><div class="rl-stat-label">参数覆盖</div><div class="rl-stat-value">5</div><div class="rl-stat-sub">5 个模型自定义 · 3 项全局默认</div></div>
     <div class="rl-stat"><div class="rl-stat-label">契约健康</div><div class="rl-stat-value">降级</div><div class="rl-stat-sub rl-stat-sub-warn">1 项缺失</div></div>
   </div>
   ${tabs(active)}
-  ${active === 'models' ? `<section id="rl-panel-models" role="tabpanel" aria-labelledby="rl-tab-models" class="rl-panel"><section class="rl-card"><h3 class="rl-card-title">模型</h3><div class="rl-field-hint">按 provider 分组的模型级默认；点击行编辑思考强度、多模态与采样参数</div>${workbench(compact)}<details class="rl-disclosure"><summary class="rl-disclosure-summary">高级：按 provider/model 键精确管理（可选）</summary></details></section></section>` : ''}
+  ${active === 'models' ? `<section id="rl-panel-models" role="tabpanel" aria-labelledby="rl-tab-models" class="rl-panel"><section class="rl-card"><h3 class="rl-card-title">模型</h3><div class="rl-field-hint">按模型提供商分组的模型级默认；点击行编辑思考强度、多模态与采样参数</div>${workbench(compact)}<details class="rl-disclosure"><summary class="rl-disclosure-summary">高级：按 模型提供商/模型 键精确管理（可选）</summary></details></section></section>` : ''}
   ${active === 'defaults' ? `<section id="rl-panel-defaults" role="tabpanel" aria-labelledby="rl-tab-defaults" class="rl-panel">${defaultsView()}</section>` : ''}
   ${active === 'diagnostics' ? `<section id="rl-panel-diagnostics" role="tabpanel" aria-labelledby="rl-tab-diagnostics" class="rl-panel">${diagnosticsView()}</section>` : ''}
 </div></div></body></html>`

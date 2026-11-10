@@ -203,20 +203,20 @@ export function normalizeInput(list) // 去重 + 强制 text + 仅注册模态
 ## 7. 设置页信息架构（模型中心工作台）
 
 ```text
-┌ PageHeader：统一模型管理 · 状态行（X 路由 / Y 模型 / Z 已覆盖）
+┌ PageHeader：统一模型管理 · 状态行（X 个模型提供商 / Y 个模型 / Z 自定义）
 │  actions：全局开关 · 刷新 · 一键探测
 ├ 概览条：思考档位分布 · 多模态启用数 · 参数覆盖数 · 契约健康
 ├ Tabs：模型 | 默认与预设 | 观测 | 诊断
 │
 ├ 模型
-│   toolbar：搜索 / 路由筛选 / 仅显示已覆盖 / 分组
+│   toolbar：搜索 / 模型提供商筛选 / 仅显示自定义 / 分组
 │   provider 分组卡片
-│     model row：[名称 + id] [思考强度 select] [多模态 chips] [参数摘要] [状态徽章]
+│     model row：[名称 + id] [配置来源 select：跟随全局/自定义] [只读摘要：全局 · 最大 · 温度 0.7]
 │     点击行 → 详情面板（宽屏右侧抽屉 / 窄屏展开行）：
 │       身份 · 上下文/最大输出
-│       思考强度：跟随全局 + 7 档（不可用档禁用并注明来源）
-│       多模态：文本(锁定) / 图像 toggle；显示“生效值 ← 来源”
-│       采样参数：每字段 [跟随默认 toggle + 输入]；生效/预留徽章
+│       思考强度：跟随全局（最大）/ 自定义 + 档位（不可用档禁用并注明来源）
+│       多模态：跟随宿主目录（文本 + 图像）/ 自定义：仅文本 / 自定义：文本 + 图像
+│       采样参数：来源 + 生效值；按钮只表达动作（改为跟随全局默认 / 改为跟随宿主默认）
 │       操作：恢复此模型默认
 │
 ├ 默认与预设
@@ -238,6 +238,13 @@ export function normalizeInput(list) // 去重 + 强制 text + 仅注册模态
 - 保存为即时（变更即写）+ 失败回滚 UI + Toast；不引入“保存”按钮作为唯一路径。
 - 无 document 环境（client-smoke vm）必须完整渲染节点树；样式只经 `ensureStyles`。
 - 键盘可达：tab 使用 button + aria-selected；模型行操作控件均可聚焦；toggle 有 aria-pressed；抽屉 Esc 关闭。
+- 数字参数输入（R2）：全部改为 **commit-on-blur / Enter**。控件维护本地 draft 字符串，输入期间（含 `0.`、整数的中间态）**绝不写设置**；blur 或 Enter 才提交一次。空串仅在已有 override 时提交 `null`（恢复跟随默认），否则不写；非法数字/越界显示内联错误（`aria-invalid` + 文案 + min/max 插值）且不写；合法且与已提交值相同不写。Escape 取消回退到 committed；输入法 composition 期间不提交。非聚焦时 committed 变化才同步 draft，聚焦期间不被 refresh 覆盖。
+- 隐藏 router（R2b，DEC-029）：`-router` 是另一插件的内部产物，界面不显示其 provider/模型/分组/筛选/计数/徽章，详情也不展示路由列表；router-only 也不显示。base 行内部把同 provider/model 的隐藏 router key 并入 `writeKeys`，models / modelInput / modelParams / follow / reset / undo 一次写全部 key；router-only 永不可见也不写。行只暴露 `data-model-write-keys`（内部同步用），不再有路由可见文案或 `data-model-route-keys`。
+- 行级统一来源（R2b，DEC-031）：每行只有一个「配置来源」控件——`跟随全局` = 思考强度 + 多模态 + 采样参数全部继承；`自定义` = 任一维度有覆盖。切「跟随全局」一次 mutate 清该行全部 writeKeys 的 models/modelParams/modelInput（可 undo）；切「自定义」0 写，只提示到详情设置。行内不再有思考下拉/图像 toggle/参数编辑，只读摘要显示来源 + 生效值（`全局 · 最大 · 温度 0.7` / `自定义 · 思考 高 · 图像 开 · 温度 0.6`）。
+- 详情按维度设置（R2b）：`思考强度：跟随全局（最大）/ 自定义 <选择>`，来源行写「默认档位：最大」；`多模态：跟随宿主目录（文本 + 图像）/ 自定义：仅文本 / 自定义：文本 + 图像`；`采样参数 · 温度：来源与生效值在左侧回显，按钮只表达动作「改为跟随全局默认（0.7）」/「改为跟随宿主默认」`。每项回显 `来源：… · 生效值：…`；「恢复此模型默认」保留。
+- 术语（R2b，DEC-032）：可见文案统一「模型提供商」（en: model provider），不再出现「provider / 服务商 / 路由」；筛选为「全部模型提供商 / 模型提供商筛选」；概览摘要写 `15 个模型 · 7 个模型提供商`。
+- 文案（R2b，DEC-030/032）：控件名带维度；跟随必须写来源 + 当前生效值；徽章不出现裸「已覆盖/继承」，改为「思考 高」「图像 开」「温度 0.6」等维度摘要；参数行固定 `生效值 0.7（来源：模型覆盖/全局默认/宿主）`；默认视图标题为「全局默认思考强度」「全局默认采样参数（模型未覆盖时生效）」；筛选为「全部模型提供商 / 模型提供商筛选」，页面不再出现「路由」一词（诊断视图的宿主技术细节除外）。
+- 计数口径（R2b）：PageHeader / Overview / 列表 toolbar / 「已应用」文案均为**可见 base 模型数**（真实 15）；header 的路由位改为**可见 base 模型提供商数**（真实 7），不再显示 14；provider head 只显示「N 个模型」；filter 7 项；Overview 摘要写 `15 个模型 · 7 个模型提供商`。
 - i18n：新增文案 zh/en 成对，`test/client-i18n-parity.test.mjs` 覆盖。
 - 写路径红线（RISK-005 同型）：既有 7 个写入口（enabled/level/syncDefaultAgent/models 增删改/purposes×2）全部保留并继续可写；新增入口（模型级思考、多模态、参数、预设）逐项有 client-smoke 结构断言。
 
@@ -247,6 +254,8 @@ export function normalizeInput(list) // 去重 + 强制 text + 仅注册模态
 | --- | --- | --- |
 | FEAT-007 | `lib/param-registry.js` + `lib/model-capabilities.js` + `lib/index.js`（schema、写回、注入、端点）+ 测试 | 1 commit |
 | UX-004 | `lib/client.js` 工作台重构 + `scripts/client-smoke.mjs` + `scripts/ui-preview.mjs` + 测试 | 1 commit |
+| UX-004 R2 | `lib/client.js` 数字参数 commit-on-blur/Enter（只改客户端，不动 `lib/index.js`）+ smoke/preview/i18n/设计文档 | 1 commit（随 UX-004 收口） |
+| UX-004 R2b | 隐藏 router + base 行内部同步 + 行级「跟随全局/自定义」+ 详情维度设置 + 统一词汇/筛选/计数（只改客户端） | 1 commit（随 UX-004 收口） |
 | GOV-007 | bootstrap 0.99.0 + plan-tracker 版本 + snapshot + 健康记录修复 | 1 commit |
 | REL-014 | v0.10.0 版本收口（待用户授权） | 发布链 |
 
@@ -259,7 +268,7 @@ export function normalizeInput(list) // 去重 + 强制 text + 仅注册模态
   - `test/model-info-endpoint.test.mjs`：路由/模型聚合、listModels 失败降级、缓存、回环门控。
   - 既有 338 用例零回归（双树）。
 - **UX-004**：
-  - `client-smoke`：四 tab 渲染；模型行写路径（思考/多模态/参数）实驱断言；旧 7 入口保留；无 document 环境。
+  - `client-smoke`：四 tab 渲染；数字参数 draft → blur/Enter 一次写、Escape/非法值不写；R2b 7 提供商 × 15 模型隐藏 router 后 15 行/7 组、0 路由/服务商文案、页面含「模型提供商」、base 行 `writeKeys` 含隐藏 router key、行级来源 0 写/一次清三处、详情三维度写入（含「默认档位」「跟随宿主目录」「改为跟随宿主默认」动作文案）、undo；旧 7 入口保留；无 document 环境。
   - `client-i18n-parity`：新 key zh/en 等价。
   - `ui-preview`：工作台静态预览（至少模型视图与默认视图）无横向溢出。
 - **真机**：DSH 重启 → 设置 → 统一模型管理；逐项操作并截图；用户观感验收。
