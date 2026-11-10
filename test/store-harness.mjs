@@ -106,6 +106,11 @@ export function makeStoreCtx(store, options = {}) {
         store.piAi = clone(value)
         state.piAiSection = store.piAi
       }
+      // FEAT-007：多模态写回走整节 replace（deepseek 节）——桩同步 live store，
+      // 与 harness.mjs 同款语义，保证「写→读→撤销」判别链路可驱动。
+      if (ns === 'llm-deepseek' && store.deepseek !== undefined) {
+        store.deepseek = clone(value)
+      }
       return Promise.resolve()
     },
   }

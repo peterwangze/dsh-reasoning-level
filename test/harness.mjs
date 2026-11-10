@@ -28,7 +28,8 @@
  * （ctx.get('webServer') 恒 undefined 且 ['webServer'] 注入回调登记不触发），
  * 由 state.provideWebServer() 触发迟到挂载；state.restartWebServer() 模拟服务
  * 重启（销毁旧 child effect + 新实例重投递）。默认行为不变：mount 后同步拿到
- * 四条路由。withoutInject=true 移除 ctx.inject 表面（回退路径用例）。
+ * 五条路由（stats / 模型信息 / test / probe / probe-apply；FEAT-007 起模型信息
+ * 端点同批挂载）。withoutInject=true 移除 ctx.inject 表面（回退路径用例）。
  */
 import { register } from 'node:module'
 import { EventEmitter } from 'node:events'
@@ -74,6 +75,11 @@ export const RL_DEFAULTS = Object.freeze({
   statsPublic: false,
   probeBlacklist: {},
   probeEfforts: {},
+  // FEAT-007（设计 §3）：全部可选、默认空包——桩投影与真实 describe().value 同形
+  defaults: { params: {} },
+  modelParams: {},
+  modelInput: {},
+  appliedInputs: {},
 })
 
 /** 构造一个完整 stub ctx；options 覆盖桩行为。 */
@@ -109,9 +115,39 @@ export function makeCtx(options = {}) {
     describeCalls: 0,    // describe() 调用计数（R0-P1-1 缓存判别测试观察面）
     events: [],          // 'replace:<ns>' / 'mutate:<ns>' 顺序记录（F2 断言）
     handlers: new Map(), // event -> callback（测试驱动钩子路径用）
+    logs: [],            // { level, args }：logger 面（apply 次数/错误观测）
+    eventHandlerErrors: [], // emitSettingsEvents 时 handler 同步抛出的错误
+    settings: undefined, // 设置桩本体（live-apply 用例经真实写 API 驱动 handler）
   }
   const revisions = new Map([['llm-pi-ai', 0], ['llm-reasoning', 0], ['llm-deepseek', 0], ['llm-deepseek-account', 0], ['agent-default-model', 0]])
   const bump = (ns) => revisions.set(ns, (revisions.get(ns) ?? 0) + 1)
+  /**
+   * 写守卫（opt-in）：模拟宿主 HMR 的 AsyncLocalStorage 事务——事务内启动的 settings
+   * 写被 dsh-hmr `runExclusive` 以 `HMR transactions cannot be nested` 拒绝。
+   * 由用例注入（例：() => hmr.getStore() === true ? new Error('HMR transactions cannot be nested') : undefined）。
+   */
+  const writeGuardError = () => (typeof options.writeGuard === 'function' ? options.writeGuard() : undefined)
+  /** opt-in：第一次 mutate/replace 抛宿主 HMR 事务拒绝文本，第二次成功（重试路径判别）。 */
+  let hmrNestedOncePending = options.hmrNestedOnce === true
+  const takeHmrNestedOnce = () => {
+    if (!hmrNestedOncePending) return undefined
+    hmrNestedOncePending = false
+    return new Error('HMR transactions cannot be nested')
+  }
+  /**
+   * 真实宿主在 settings 写落定后 emit `settings/document-updated`（dsh-settings
+   * lib/index.js L435/L461，同步派发）。opt-in：既有用例的即时计数语义不变；
+   * live-apply 事件路径用例显式打开，验证「写事件 → 真实 handler → apply」整链
+   * （不手工调用 handler）。
+   */
+  function emitSettingsUpdated(ns) {
+    if (options.emitSettingsEvents !== true) return
+    for (const [eventName, handler] of state.handlers) {
+      if (eventName !== 'settings/document-updated' && eventName !== 'settings/updated') continue
+      if (typeof handler !== 'function') continue
+      try { handler(ns) } catch (error) { state.eventHandlerErrors.push(error) }
+    }
+  }
   // 内存版 SettingsForms 桩（0.2.0-rc.2 形状）：
   //  · describe() → 描述符数组（value 投影 / user 覆盖层 / revision 计数）
   //  · update/replace/mutate → 记录 + 写 user 层 + bump revision（piAi 的
@@ -133,12 +169,22 @@ export function makeCtx(options = {}) {
       ]
     },
     update(ns, patch) {
+      // update = 「宿主自己」的写（live-apply 用例在 HMR 事务里模拟用户改设置），
+      // 不套 writeGuard；guard 只拦插件写（mutate/replace）。
       state.updateCalls.push({ ns, patch: clone(patch) })
       state.events.push('update:' + ns)
       bump(ns)
+      // 真实宿主 update = 用户层深合并；本桩对 llm-reasoning 顶层浅合并（live-apply
+      // 用例需让 level 真正进入 configOf 的读面）。
+      if (ns === 'llm-reasoning') state.nsConfig = { ...state.nsConfig, ...clone(patch) }
+      emitSettingsUpdated(ns)
       return Promise.resolve()
     },
     mutate(ns, ops) {
+      const guard = writeGuardError()
+      if (guard !== undefined) return Promise.reject(guard)
+      const nestedOnce = takeHmrNestedOnce()
+      if (nestedOnce !== undefined) return Promise.reject(nestedOnce)
       state.mutateCalls.push({ ns, ops })
       state.events.push('mutate:' + ns)
       bump(ns)
@@ -157,13 +203,21 @@ export function makeCtx(options = {}) {
       // 「还原后清除所有权」这类语义就测不出来。
       if (ns === 'llm-reasoning' && Array.isArray(ops)) {
         for (const op of ops) {
-          if (op === null || typeof op !== 'object' || !Array.isArray(op.path) || op.path.length !== 1 || op.path[0] !== 'applied') continue
-          if (op.op === 'set') state.nsConfig = { ...state.nsConfig, applied: clone(op.value) }
+          if (op === null || typeof op !== 'object' || !Array.isArray(op.path) || op.path.length !== 1) continue
+          // FEAT-007：能力写回台账 appliedInputs 同样是持久面 read-modify-write
+          // （写入后登记 / 撤销后清除），必须回写 nsConfig 才可判别。
+          if (op.path[0] !== 'applied' && op.path[0] !== 'appliedInputs') continue
+          if (op.op === 'set') state.nsConfig = { ...state.nsConfig, [op.path[0]]: clone(op.value) }
         }
       }
+      emitSettingsUpdated(ns)
       return Promise.resolve()
     },
     replace(ns, value) {
+      const guard = writeGuardError()
+      if (guard !== undefined) return Promise.reject(guard)
+      const nestedOnce = takeHmrNestedOnce()
+      if (nestedOnce !== undefined) return Promise.reject(nestedOnce)
       state.replaceCalls.push({ ns, value })
       state.events.push('replace:' + ns)
       bump(ns)
@@ -172,6 +226,7 @@ export function makeCtx(options = {}) {
         // 仅在 replaceImpl 未抛出时更新 piAiSection（若抛出则保留原值）
         return Promise.resolve(promise).then(() => {
           state.piAiSection = clone(value)
+          emitSettingsUpdated(ns)
         }).catch((error) => {
           state.replaceCalls.pop() // 移除失败记录
           state.events.pop()
@@ -181,19 +236,36 @@ export function makeCtx(options = {}) {
       if (ns === 'llm-reasoning') {
         return Promise.resolve(promise).then(() => {
           state.nsConfig = clone(value)
+          emitSettingsUpdated(ns)
         })
       }
-      return Promise.resolve(promise)
+      // FEAT-007：多模态写回走 settings.replace 整节写入（deepseek 系两代适配器
+      // 各一节）。桩必须把 replace 结果反映到 state，才能驱动「写→读→撤销」链路。
+      const sectionTarget = ns === 'llm-deepseek'
+        ? 'deepseekSection'
+        : (ns === 'llm-deepseek-account' ? 'deepseekAccountSection' : undefined)
+      if (sectionTarget !== undefined) {
+        return Promise.resolve(promise).then(() => {
+          state[sectionTarget] = clone(value)
+          emitSettingsUpdated(ns)
+        })
+      }
+      return Promise.resolve(promise).then(() => { emitSettingsUpdated(ns) })
     },
   }
   const llm = {
     resolveModelInfo: options.resolveModelInfo ?? (async () => undefined),
     stream: options.stream ?? (async function* () {}),
+    // FEAT-007：模型信息端点枚举面（真实宿主 0.2.1/0.2.2 均在场）。只在显式注入
+    // 时提供方法，保留「旧宿主形态缺席 → 端点降级」负相可测。
+    ...(options.listProviders !== undefined ? { listProviders: options.listProviders } : {}),
+    ...(options.listModels !== undefined ? { listModels: options.listModels } : {}),
   }
   // MAINT-036：settingsImpl 允许整体替换设置桩（契约自检负相——缺方法/缺 entry
   // 的旧宿主形态）；timeoutImpl 允许驱动 boot 重试链（缺省 no-op，既有测试语义
   // 不变——entry 缺席重试在缺省桩下不推进，负相测试显式注入同步实现）。
   const settings = options.settingsImpl ?? builtInSettings
+  state.settings = settings
   /** 内存 webServer 桩：register 捕获 path -> handler；disposer 只卸载自己注册的处理器。 */
   const makeWebServer = () => ({
     register({ kind, path, handler }) {
@@ -215,7 +287,11 @@ export function makeCtx(options = {}) {
     settings,
     llm,
     fiber: {}, // cordis fiber（configure(presentation, owner) 的 owner 参数面）
-    logger: { warn() {}, info() {}, error() {} },
+    logger: {
+      warn(...args) { state.logs.push({ level: 'warn', args }) },
+      info(...args) { state.logs.push({ level: 'info', args }) },
+      error(...args) { state.logs.push({ level: 'error', args }) },
+    },
     get(key) {
       if (key === 'webServer') return webServerVisible ? activeWebServer : undefined
       // MAINT-042：可注入额外宿主服务（agents registry）——未提供时保持 undefined，

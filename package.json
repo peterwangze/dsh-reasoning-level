@@ -31,6 +31,8 @@
     "lib/client.js",
     "lib/host-compat.js",
     "lib/agent-selection.js",
+    "lib/param-registry.js",
+    "lib/model-capabilities.js",
     "cordis.patch.yml",
     "install.ps1",
     "install.sh",

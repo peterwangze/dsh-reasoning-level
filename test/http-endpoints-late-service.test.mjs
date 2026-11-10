@@ -12,8 +12,8 @@
  *
  * 本文件是该缺陷的回归防护网（判别性质：旧实现 apply 期无 webServer 时，
  * 即使服务随后到货也永不挂载 → late-2/late-3/late-5 红）。用例覆盖：
- *  ① apply 期无 webServer → 四端点均未注册且不抛错（静默降级不炸机）；
- *  ② provideWebServer() 迟到挂载 → 四端点全部注册，stats 200 + 合法 JSON；
+ *  ① apply 期无 webServer → 五端点均未注册且不抛错（静默降级不炸机）；
+ *  ② provideWebServer() 迟到挂载 → 五端点全部注册，stats 200 + 合法 JSON；
  *  ③ 重复 provide / 同实例二次注入 → register 次数稳定（无双注册）；
  *  ④ 宿主无 ctx.inject 表面 → 回退一次性 ctx.get（既有行为保持）；
  *  ⑤ 服务重启（新实例）→ 旧路由随 scope effect 销毁、新实例重挂。
@@ -29,8 +29,8 @@ import assert from 'node:assert/strict'
 import { makeCtx, mount, callRoute } from './harness.mjs'
 
 const STATS = '/reasoning-level-stats'
-/** 统计/测试/探测/固化四个端点（顺序 = 注册顺序）。 */
-const ENDPOINTS = [STATS, STATS + '/test', STATS + '/probe', STATS + '/probe/apply']
+/** 统计/测试/探测/固化 + FEAT-007 模型信息五个端点（顺序 = 注册顺序）。 */
+const ENDPOINTS = [STATS, '/reasoning-level-models', STATS + '/test', STATS + '/probe', STATS + '/probe/apply']
 
 /** 等待挂载链落定（provideWebServer 当前为同步投递，保留异步窗口与 mount 一致）。 */
 async function settle() {
@@ -38,7 +38,7 @@ async function settle() {
   await new Promise((resolve) => setImmediate(resolve))
 }
 
-test('(late-1) apply 期无 webServer → 四个端点均未注册且不抛错（静默降级不炸机）', async () => {
+test('(late-1) apply 期无 webServer → 五个端点均未注册且不抛错（静默降级不炸机）', async () => {
   const { ctx, state } = makeCtx({ nsConfig: { enabled: false, statsPublic: true }, deferWebServer: true })
   await mount(ctx) // 不抛错即通过：插件行加载绝不能依赖 webServer 就绪
   for (const path of ENDPOINTS) {
@@ -48,7 +48,7 @@ test('(late-1) apply 期无 webServer → 四个端点均未注册且不抛错�
   // 未注册 ≠ 失败：提供方到货后仍须可挂载（late-2 正面证明）
 })
 
-test('(late-2) provideWebServer() 迟到挂载 → 四端点全部注册且 stats 返回 200 + 合法 JSON', async () => {
+test('(late-2) provideWebServer() 迟到挂载 → 五端点全部注册且 stats 返回 200 + 合法 JSON', async () => {
   const { ctx, state } = makeCtx({ nsConfig: { enabled: true, level: 'high', statsPublic: true }, deferWebServer: true })
   await mount(ctx)
   state.provideWebServer()
@@ -56,7 +56,7 @@ test('(late-2) provideWebServer() 迟到挂载 → 四端点全部注册且 stat
   for (const path of ENDPOINTS) {
     assert.ok(state.routes.has(path), `webServer 迟到到货后必须挂载 ${path}（0.2.x 代序静默失效回归）`)
   }
-  assert.equal(state.routeRegistrations.length, ENDPOINTS.length, '四条路由各注册一次（无重复）')
+  assert.equal(state.routeRegistrations.length, ENDPOINTS.length, '五条路由各注册一次（无重复）')
   const r = await callRoute(state, STATS)
   assert.equal(r.code, 200, 'stats 端点必须可读')
   assert.equal(typeof r.payload.since, 'number', 'stats JSON 必含 since')
@@ -75,7 +75,7 @@ test('(late-3) 重复 provide / 同实例二次注入 → register 次数稳定�
   state.provideWebServer()
   await settle()
   const afterFirst = state.routeRegistrations.length
-  assert.equal(afterFirst, ENDPOINTS.length, '首次迟到挂载 = 四条路由')
+  assert.equal(afterFirst, ENDPOINTS.length, '首次迟到挂载 = 五条路由')
   // 同一实例重复投递（防御性场景；真实 cordis 的服务重启=新实例，见 late-5）：
   // 幂等守卫必须拒绝重复注册
   state.provideWebServer()
@@ -105,7 +105,7 @@ test('(late-5) 服务重启（新实例）→ 旧路由随 scope effect 销毁�
   assert.equal(state.routeRegistrations.length, ENDPOINTS.length)
   state.restartWebServer() // 服务重启 = 新实例：旧 child effect 销毁 + 新实例重投递
   await settle()
-  assert.equal(state.routeRegistrations.length, ENDPOINTS.length * 2, '新实例必须重挂四条路由（旧实例 disposer 已卸载）')
+  assert.equal(state.routeRegistrations.length, ENDPOINTS.length * 2, '新实例必须重挂五条路由（旧实例 disposer 已卸载）')
   for (const path of ENDPOINTS) {
     assert.ok(state.routes.has(path), `${path} 必须由新实例重新挂载`)
     assert.notEqual(state.routes.get(path), firstHandlers.get(path), `${path} 处理器必须来自新实例（旧 handler 不得残留）`)
