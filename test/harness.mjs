@@ -122,11 +122,12 @@ export function makeCtx(options = {}) {
   const revisions = new Map([['llm-pi-ai', 0], ['llm-reasoning', 0], ['llm-deepseek', 0], ['llm-deepseek-account', 0], ['agent-default-model', 0]])
   const bump = (ns) => revisions.set(ns, (revisions.get(ns) ?? 0) + 1)
   /**
-   * 写守卫（opt-in）：模拟宿主 HMR 的 AsyncLocalStorage 事务——事务内启动的 settings
-   * 写被 dsh-hmr `runExclusive` 以 `HMR transactions cannot be nested` 拒绝。
-   * 由用例注入（例：() => hmr.getStore() === true ? new Error('HMR transactions cannot be nested') : undefined）。
+   * 写守卫（opt-in）：模拟宿主写失败/HMR 事务拒绝。回调收到写请求
+   * `{ kind: 'mutate'|'replace', ns, ops|value }`，可按 ns 定向拒绝（例如只拒
+   * llm-deepseek、放行 llm-reasoning 台账写）；返回 Error 即拒绝本次写。
+   * 默认不传 guard = 不拒绝；既有 `() => error` 写法语义不变（忽略参数、全拒）。
    */
-  const writeGuardError = () => (typeof options.writeGuard === 'function' ? options.writeGuard() : undefined)
+  const writeGuardError = (request) => (typeof options.writeGuard === 'function' ? options.writeGuard(request) : undefined)
   /** opt-in：第一次 mutate/replace 抛宿主 HMR 事务拒绝文本，第二次成功（重试路径判别）。 */
   let hmrNestedOncePending = options.hmrNestedOnce === true
   const takeHmrNestedOnce = () => {
@@ -181,7 +182,7 @@ export function makeCtx(options = {}) {
       return Promise.resolve()
     },
     mutate(ns, ops) {
-      const guard = writeGuardError()
+      const guard = writeGuardError({ kind: 'mutate', ns, ops })
       if (guard !== undefined) return Promise.reject(guard)
       const nestedOnce = takeHmrNestedOnce()
       if (nestedOnce !== undefined) return Promise.reject(nestedOnce)
@@ -214,7 +215,7 @@ export function makeCtx(options = {}) {
       return Promise.resolve()
     },
     replace(ns, value) {
-      const guard = writeGuardError()
+      const guard = writeGuardError({ kind: 'replace', ns, value })
       if (guard !== undefined) return Promise.reject(guard)
       const nestedOnce = takeHmrNestedOnce()
       if (nestedOnce !== undefined) return Promise.reject(nestedOnce)
