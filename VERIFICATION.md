@@ -168,10 +168,10 @@ dsh --profile canary web          # 观察启动日志无 failed fiber / 无等�
 
 # 3) 冒烟：浏览器打开金丝雀端口
 #    a. 发一条消息 → 模型正常回复（请求路径未被破坏）
-#    b. 设置 → 统一推理等级 → 页面正常渲染、统计 2s 内出现记录
+#    b. 设置 → 统一模型管理 → 页面正常渲染（四视图）、统计 2s 内出现记录
 #    c. curl http://127.0.0.1:<port>/reasoning-level-stats → 200 + JSON
 #    d. 切换全局等级 high ↔ max → 下一条消息统计里 effort 列变化
-#    e. 设置页点「一键探测全部模型并固化配置」→ 逐模型出结果（可用/拒绝/其他），
+#    e. 设置页点「一键探测思考档位（写回模型能力声明）」→ 逐模型出结果（可用/拒绝/其他），
 #       完成后能力声明写入 settings.yaml（llm-reasoning.probeEfforts）；黑名单仅
 #       当前会话内存态（stats 端点 payload.blacklist 可见，不再写 probeBlacklist）；
 #       curl POST /reasoning-level-stats/probe/apply 幂等返回修正后的写入数
