@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.10.0 (2026-11-11)
+
+### Added
+- **统一模型管理工作台（UX-004）**：设置页重构为「模型 / 默认与预设 / 观测 / 诊断」四视图。模型按**模型提供商**分组，支持搜索、提供商筛选、仅显示自定义；每行一个「配置来源」开关（跟随全局 ↔ 自定义），点击行展开详情按维度编辑。旧 7 条写入口（enabled / level / syncDefaultAgent / models 增改删 / purposes×2）全部保留。
+- **思考强度（主功能）**：行级「跟随全局」= 思考强度 + 多模态 + 采样参数全部继承；详情里逐维度设置「跟随全局思考强度（最大）」或指定档位，并回显来源与生效值。
+- **多模态能力（主功能，FEAT-007）**：图像能力开关写 pi-ai `models[].input` / `modelOverrides[].input` 与 DeepSeek `models[].inputModalities` 三个写点；写入前登记 previous，撤销只恢复插件写入值，用户手改不被覆盖；关闭插件可还原。
+- **采样参数（通用配置，FEAT-007）**：temperature / maxTokens 运行时注入（只填调用方未给出的值，显式值优先，探测请求跳过）；topP / topK 可保存与展示，但 DSH 0.2.2 的 `GenerateOptions` / `LlmCallControls` 无对应字段，界面标注「预留」，绝不注入。`lib/param-registry.js` 提供 min/max/step/hostSupport 扩展点。
+- **预设**：精确 / 均衡 / 创意 / 自定义，作用于全局默认参数；模型级覆盖优先。
+- **模型信息端点**：`/reasoning-level-models` 投影路由、模型能力、参数注册表与契约健康（60s 缓存、并发合并、回环门控、永不 500）。
+
+### Changed
+- **数字参数输入改为失焦/回车提交**：输入过程中（`0.`、`0.65`）不再触发保存，Escape 取消，非法值只显示内联错误不写入。
+- **隐藏第三方路由版**：`xxx-router` 是其他插件的产物，界面完全不显示（不占行、分组、筛选与计数）；写入时内部与主版本同步。
+- **探测文案纠偏**：按钮改为「一键探测思考档位（写回模型能力声明）」——探测只测思考档位，不修改采样参数、多模态与全局默认。
+- 界面术语统一「模型提供商」，跟随类控件一律标注来源与当前生效值。
+
+### Fixed
+- **改设置不生效（需重启）**：设置变更在 dsh-hmr 事务内派发，旧的同步 apply 触发 `HMR transactions cannot be nested`。改为事务外调度 + first-wins 合并 + 自写抑制 + 有限重试；隔离 0.2.1 实测等级切换 0.6–1.7s、宿主 1.1–3.0s 收敛。
+- **所有权台账陈旧**：宿主已等于目标值时旧实现跳过写台账，导致关闭插件无法还原原值。现按 deepseek / 多模态 / 路由三处自愈，保留原始 previous，未持有所有权时不凭空 claim。
+- **模型信息端点**：缓存失效、回环门控、单点降级补齐；空目录 + 端点 404 不再永久 loading，15s 超时后降级目录。
+
+### Notes
+- 版本 0.9.2 → 0.10.0（MINOR）。schema 只追加可选字段（`defaults` / `modelParams` / `modelInput` / `appliedInputs`），旧配置零迁移；包名、命名空间 `llm-reasoning`、section id `reasoning-level` 均未变。
+- 安装或更新后请**完全退出并重开 DSH**，以加载新的 server 代码。
+- topP / topK 目前仅保存与展示；宿主提供字段后经 `lib/param-registry.js` 的 `hostSupport` / `apply` 扩展点启用。
+- 质量依据：主树 **246/246**、compat 0.2.2 **246/246**、root **509/509**；`client-smoke` OK；`host:doctor` 12/12；`npm pack` 12 files；真实 0.2.2 桌面 15 模型 / 7 模型提供商 / 控制台零错误；独立审查 FEAT-007 R2 与 UX-004 R2b 均 APPROVED_WITH_NOTES（P0/P1=0，unresolved_blockers=0）。
+
 ## 0.9.2 (2026-11-07)
 
 ### Fixed
