@@ -163,6 +163,28 @@ test('(feat008/seam-4) 部分在场（仅 dsh-app-boot——镜像树真实形�
   assert.match(r.evidence, /\bdsh 目标树不可解析（INFO/, '缺席包必须记 INFO 行（非 FAIL）')
 })
 
+// FEAT-008 rework：基线电池的 #13 断言按树形状条件化（全缺席=SKIP / 任一在场
+// =PASS）——本用例用 fixture 构造基线源的在场形态（不依赖真实镜像树），钉死
+// **baseline 分级下的 PASS 路径**：接缝包传递在场（rc.5 镜像闭包：app-boot 经
+// dsh-agent-default-model→dsh-config-editor 传递在场，npm ls 实证）时探针不得
+// 误报 FAIL/SKIP；在场包锚串漂移在 baseline 分级下 = FAIL（seam-2 已证）——
+// 判别力两态齐全。
+test('(feat008/seam-5) 基线源在场路径（fixture）：全场 → PASS；部分在场（镜像闭包形态）→ PASS + 缺席 INFO（baseline 分级不误报）', async (t) => {
+  const full = forgeSeamTree(tempDir(t))
+  full.kind = 'baseline'
+  full.label = 'fixture 基线源（三包全场）'
+  const rFull = await runEntry(entry13, full)
+  assert.equal(rFull.status, 'PASS', `基线源三包在场且锚串真实必须 PASS（实得 ${rFull.status}）：\n${rFull.evidence}`)
+
+  const partial = forgeSeamTree(tempDir(t), { desktopHost: false, dshMeta: false })
+  partial.kind = 'baseline'
+  partial.label = 'fixture 基线源（app-boot 传递在场——镜像闭包形态）'
+  const rPartial = await runEntry(entry13, partial)
+  assert.equal(rPartial.status, 'PASS', `基线源部分在场必须 PASS（在场包照常断言；实得 ${rPartial.status}）：\n${rPartial.evidence}`)
+  assert.match(rPartial.evidence, /dsh-app-boot@0\.2\.2-rc\.5-fixture "scope: "installation"" → lib\/index\.js:L\d+/, '在场包锚点命中（baseline 分级）')
+  assert.match(rPartial.evidence, /\bdsh 目标树不可解析（INFO/, '缺席包记 INFO 行（baseline 分级同样不误报 FAIL）')
+})
+
 // ── ② 单源：观测名单 === package.json peerDependencies 键集 ──────────────────
 test('(feat008/single-source) HOST_LOADER_SEAM.peers 键集 === package.json peerDependencies 键集', () => {
   const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))

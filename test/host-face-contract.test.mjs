@@ -42,10 +42,11 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import vm from 'node:vm'
 import {
-  baselineSource, liveSourceFromEnv, requirePackage, runEntry, runBattery,
+  baselineSource, liveSourceFromEnv, requirePackage, resolvePackage, runEntry, runBattery,
   loadApiRemotesContributions, descriptorOf, descriptorIdOf, checkArityTable,
   mirrorMatches, PROBES, doctorExit, baselinePinnedVersion,
 } from './host-probes.mjs'
+import { HOST_LOADER_SEAM } from '../lib/host-compat.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -57,18 +58,31 @@ const ownProbes = PROBES.filter((p) => !p.requiresHostTree)
 const fmt = (r) => `  #${r.id} [${r.status}]${r.skip ? `(${r.skip})` : ''} ${r.touchpoint}\n      ${r.status === 'PASS' ? r.evidence : (r.skipReason ?? r.evidence)}${r.hint ? `\n      ↳ ${r.hint}` : ''}`
 
 // ── 工件源①：devDeps 锁版基线全量断言（CI 恒跑 fail-closed）────────────────
-// FEAT-008（#13 例外）：加载器接缝三包（dsh-desktop-host/dsh/dsh-app-boot）不在
-// devDeps 锁版（desktop-host npm 未发布 E404 实证；app-boot/dsh 未入锁）——基线
-// 缺席 = 设计内 SKIP-UNRESOLVED（INFO），不是锁版漂移，单独断言其形态；其余
-// 宿主树探针仍必须全 PASS。
-test('(FEAT-002/§4.2 条目1-7,10,12) 工件源① devDeps 基线：全部宿主树探针必须 PASS（包缺席/版本失配即 throw）；#13 接缝三包不在锁版 → 设计内 SKIP-UNRESOLVED — // TDD-GUARD-MAINT-025', async () => {
+// FEAT-008（#13 形态按树形状条件化）：加载器接缝三包（dsh-desktop-host/dsh/
+// dsh-app-boot）不在 devDeps 锁版（desktop-host npm 未发布 E404 实证；dsh/
+// app-boot 未入锁），但是否**传递在场**取决于闭包——主树（0.2.1-rc.2）三包全
+// 缺席 → 探针 #13 设计内 SKIP-UNRESOLVED；rc.5 镜像闭包 dsh-app-boot 经
+// dsh-agent-default-model→dsh-config-editor 传递在场（npm ls 实证）→ 部分在场
+// → PASS + 缺席包 INFO 行。判定与探针 #13 同一解析路径（resolvePackage——判据
+// 零分叉），两条形态都**精确断言**（在场包锚串漂移在 baseline 分级下 = FAIL，
+// 两分支皆红——判别力不放宽）。
+test('(FEAT-002/§4.2 条目1-7,10,12) 工件源① devDeps 基线：全部宿主树探针必须 PASS（包缺席/版本失配即 throw）；#13 按接缝三包可解析性条件化（全缺席=SKIP-UNRESOLVED / 任一在场=PASS+缺席 INFO）— // TDD-GUARD-MAINT-025', async () => {
   const results = []
   for (const probe of hostTreeProbes) results.push(await runEntry(probe, baseline))
   const seam = results.find((r) => r.id === 13)
   assert.ok(seam !== undefined, '探针 #13（加载器接缝）必须在注册表中')
-  assert.equal(seam.status, 'SKIP', `#13 基线形态必须 SKIP（三包不在 devDeps 锁版；实得 ${seam.status}）：\n${fmt(seam)}`)
-  assert.equal(seam.skip, 'UNRESOLVED', `#13 skip 类别必须 UNRESOLVED（实得 ${seam.skip}）`)
-  assert.match(seam.skipReason, /不在 devDeps 锁版/, `#13 skip 必须说明接缝包不在锁版的 INFO 归因（实得：${seam.skipReason}）`)
+  const seamNames = Object.keys(HOST_LOADER_SEAM.packages)
+  const seamPresent = seamNames.filter((name) => resolvePackage(baseline, name) !== null)
+  if (seamPresent.length === 0) {
+    assert.equal(seam.status, 'SKIP', `#13 全缺席形态必须 SKIP（三包不在 devDeps 锁版；实得 ${seam.status}）：\n${fmt(seam)}`)
+    assert.equal(seam.skip, 'UNRESOLVED', `#13 skip 类别必须 UNRESOLVED（实得 ${seam.skip}）`)
+    assert.match(seam.skipReason, /不在 devDeps 锁版/, `#13 skip 必须说明接缝包不在锁版的 INFO 归因（实得：${seam.skipReason}）`)
+  } else {
+    assert.equal(seam.status, 'PASS', `#13 部分在场形态必须 PASS（在场包锚串全中；在场包锚串漂移=FAIL 仍红；实得 ${seam.status}）：\n${fmt(seam)}`)
+    for (const name of seamNames.filter((n) => !seamPresent.includes(n))) {
+      assert.match(seam.evidence, new RegExp(`${name} 目标树不可解析（INFO`), `缺席包 ${name} 必须记 INFO 行（非 FAIL）`)
+    }
+  }
   const bad = results.filter((r) => r.status !== 'PASS' && r.id !== 13)
   assert.equal(bad.length, 0, `工件源①（${baseline.label}）基线断言必须全 PASS——锁版工件不该漂，任何 FAIL 都意味着锁版被动过或宿主 artifact 异常：\n${results.map(fmt).join('\n')}`)
 })
