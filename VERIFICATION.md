@@ -143,6 +143,12 @@ $env:DSH_ASAR = "D:/app/dsh/resources/app.asar"; npm run host:doctor
   dsh-agent-loop/dsh-llm/dsh-host-webserver，事件名/校验结构/webServer 面
   均在基线域内）；工件源② = `DSH_HOST_TREE` 活树（在场即断言/缺席即逐条
   显式 SKIP 带原因）。
+- **探针 #13（加载器解析接缝，FEAT-008）的在场语义**：dsh-desktop-host /
+  dsh / dsh-app-boot 三包**不在 devDeps 锁版**（desktop-host npm 未发布、
+  仅桌面归档内有）——对基线树与无这三包的树输出 **SKIP-UNRESOLVED（INFO，
+  属预期形态）**，仅对桌面 asar 提取树 / 完整 dsh 安装树断言
+  `installAnchor → createRuntimeResolution 双作用域 → PluginPackages 接线 →
+  裸包名 internal.import 委托` 四环锚串（出处台账 S13）。
 
 **DRIFT 复核 SOP（BM-2——防「忽略红灯」习惯）**：
 

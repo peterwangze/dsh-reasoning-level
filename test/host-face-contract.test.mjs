@@ -19,7 +19,7 @@
  *   守卫对照：用真实描述符 + 逐字复制的 gateway 元数守卫驱动正反例——
  *           2 参写调用必被拒（负对照）、3 参含显式 undefined 必放行（正对照）。
  *
- * FEAT-002 泛化（设计 §4，DEC-018 ③④）：断言清单 §4.2 十二条探针化到
+ * FEAT-002 泛化（设计 §4，DEC-018 ③④）：断言清单 §4.2 十三条探针化到
  * test/host-probes.mjs（测试与 doctor 共用，判据零分叉），本文件是 node:test
  * 外壳。双工件源：
  *   工件源① baseline = 仓库 node_modules devDeps 精确锁版（含 0.1.2-rc.1 的
@@ -57,10 +57,19 @@ const ownProbes = PROBES.filter((p) => !p.requiresHostTree)
 const fmt = (r) => `  #${r.id} [${r.status}]${r.skip ? `(${r.skip})` : ''} ${r.touchpoint}\n      ${r.status === 'PASS' ? r.evidence : (r.skipReason ?? r.evidence)}${r.hint ? `\n      ↳ ${r.hint}` : ''}`
 
 // ── 工件源①：devDeps 锁版基线全量断言（CI 恒跑 fail-closed）────────────────
-test('(FEAT-002/§4.2 条目1-7,10) 工件源① devDeps 基线：全部宿主树探针必须 PASS（包缺席/版本失配即 throw）— // TDD-GUARD-MAINT-025', async () => {
+// FEAT-008（#13 例外）：加载器接缝三包（dsh-desktop-host/dsh/dsh-app-boot）不在
+// devDeps 锁版（desktop-host npm 未发布 E404 实证；app-boot/dsh 未入锁）——基线
+// 缺席 = 设计内 SKIP-UNRESOLVED（INFO），不是锁版漂移，单独断言其形态；其余
+// 宿主树探针仍必须全 PASS。
+test('(FEAT-002/§4.2 条目1-7,10,12) 工件源① devDeps 基线：全部宿主树探针必须 PASS（包缺席/版本失配即 throw）；#13 接缝三包不在锁版 → 设计内 SKIP-UNRESOLVED — // TDD-GUARD-MAINT-025', async () => {
   const results = []
   for (const probe of hostTreeProbes) results.push(await runEntry(probe, baseline))
-  const bad = results.filter((r) => r.status !== 'PASS')
+  const seam = results.find((r) => r.id === 13)
+  assert.ok(seam !== undefined, '探针 #13（加载器接缝）必须在注册表中')
+  assert.equal(seam.status, 'SKIP', `#13 基线形态必须 SKIP（三包不在 devDeps 锁版；实得 ${seam.status}）：\n${fmt(seam)}`)
+  assert.equal(seam.skip, 'UNRESOLVED', `#13 skip 类别必须 UNRESOLVED（实得 ${seam.skip}）`)
+  assert.match(seam.skipReason, /不在 devDeps 锁版/, `#13 skip 必须说明接缝包不在锁版的 INFO 归因（实得：${seam.skipReason}）`)
+  const bad = results.filter((r) => r.status !== 'PASS' && r.id !== 13)
   assert.equal(bad.length, 0, `工件源①（${baseline.label}）基线断言必须全 PASS——锁版工件不该漂，任何 FAIL 都意味着锁版被动过或宿主 artifact 异常：\n${results.map(fmt).join('\n')}`)
 })
 

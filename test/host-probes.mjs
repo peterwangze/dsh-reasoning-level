@@ -32,7 +32,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import vm from 'node:vm'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { HOST_EVENTS, HOST_REMOTE_CONTRACT, HOST_PROVENANCE } from '../lib/host-compat.js'
+import { HOST_EVENTS, HOST_LOADER_SEAM, HOST_REMOTE_CONTRACT, HOST_PROVENANCE } from '../lib/host-compat.js'
 
 export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -752,7 +752,53 @@ async function probeFailLoud() {
   }
 }
 
-// ── 探针注册表（§4.2 十二条——顺序即条目号）────────────────────────────────
+// ── 条目 13（S13）：加载器解析接缝（T 级；FEAT-008）─────────────────────────
+// 守护对象 = 插件 peer 解析所依赖的宿主加载器内部机制链（桌面 asar 时代 peer
+// 全部经 installation 作用域解析——与宿主服务同源同代；语义/出处见
+// HOST_PROVENANCE S13）。三包锚串值单源取 HOST_LOADER_SEAM（host-compat）：
+//  · dsh-desktop-host —— installAnchor 构造（桌面归档独有包：npm 未发布 E404
+//    实证）；· dsh —— profile-boot 把 resolution 接线到 PluginPackages（消费端）；
+//  · dsh-app-boot —— createRuntimeResolution + installation/profile 作用域字面
+//    + mountRootInclude 裸包名委托（0.2.1-rc.2/0.2.2-rc.5 锚串逐字一致——npm
+//    tarball 双代实证，无需双代判别）。
+// 与其他宿主树探针的关键差异：三包**均不在 devDeps 锁版**——用 resolvePackage
+//（BM-3 宽容归因）而非 requirePackage（baseline 缺席即 fail-closed throw，会让
+// 主树基线恒红）：全缺席 = SKIP-UNRESOLVED（INFO：接缝包只在桌面 asar 树/完整
+// dsh 安装树在场）；部分在场（如镜像树仅 app-boot 传递在场）→ 在场包锚串照常
+// 断言，缺席包记 INFO 行；在场而锚串缺失 = 真 FAIL/DRIFT（宿主改解析机制）。
+function probeLoaderSeam(source) {
+  const rows = []
+  let failed = false
+  let present = 0
+  for (const [name, anchors] of Object.entries(HOST_LOADER_SEAM.packages)) {
+    const pkg = resolvePackage(source, name)
+    if (pkg === null) {
+      rows.push(`${name} 目标树不可解析（INFO——加载器接缝包不在 devDeps 锁版，仅桌面 asar 树/完整 dsh 安装树在场，锚点未断言）`)
+      continue
+    }
+    present += 1
+    const sources = libSources(pkg.dir)
+    for (const anchor of anchors) {
+      const hit = findAnchor(sources, anchor)
+      if (hit === null) { failed = true; rows.push(`${name}@${pkg.version} ✗"${anchor}"`) }
+      else rows.push(`${name}@${pkg.version} "${anchor}" → ${hit.relFile}:L${hit.line}`)
+    }
+  }
+  if (present === 0) {
+    return {
+      status: 'SKIP', skip: 'UNRESOLVED',
+      skipReason: 'dsh-desktop-host/dsh/dsh-app-boot（加载器接缝三包）均在目标树不可解析——它们不在 devDeps 锁版，仅桌面 asar 树（或完整 dsh 安装树）在场（BM-3：先确认树布局，不做契约判断）',
+      evidence: rows.join(' ; '),
+      hint: '对桌面安装跑 doctor 会自动定位 app.asar 提取真树（接缝三包在场）；或 --tree 指向含 @deepseek-ai/dsh 的完整树',
+    }
+  }
+  if (failed) {
+    return rawFail(rows.join(' ; '), 'S13 加载器解析接缝漂移——peer 解析机制变更 = 插件装载期 ERR_MODULE_NOT_FOUND（天然 fail-loud 但此前不可见）；查 HOST_PROVENANCE S13 锚点，在目标树对应包全文搜索锚串旧变体，复核宿主 changelog（installAnchor/createRuntimeResolution/PluginPackages 接线/mountRootInclude 委托）')
+  }
+  return RESULT_PASS(rows.join(' ; '))
+}
+
+// ── 探针注册表（§4.2 十三条——顺序即条目号）────────────────────────────────
 // requiresHostTree：条目 8/9/11 为自有工件探针（无源依赖，测试与 doctor 恒跑）。
 export const PROBES = [
   { id: 1, touchpoint: 'S2/S3 dsh-settings 导出面（0.2.0 SettingsForms）+ settingsNamespace 接缝（本地回退=常态）', level: 'B+T', requiresHostTree: true, run: probeSettingsFace },
@@ -767,6 +813,7 @@ export const PROBES = [
   { id: 10, touchpoint: 'C6 dsh.client.inject 声明存在性（白名单基线/活树解析）', level: 'T', requiresHostTree: true, run: probeClientInjectDeclaration },
   { id: 11, touchpoint: 'C3 适配层 fail-loud（命名空间剥离 → 结构化错误）', level: 'B', requiresHostTree: false, run: probeFailLoud },
   { id: 12, touchpoint: 'S12 原生 effort 选择面（agent/status 时机 + model.select/current）', level: 'T', requiresHostTree: true, run: probeAgentNativeSelection },
+  { id: 13, touchpoint: 'S13 加载器解析接缝（installAnchor → createRuntimeResolution 双作用域 → PluginPackages 接线 → 裸包名 internal.import 委托）', level: 'T', requiresHostTree: true, run: probeLoaderSeam },
 ]
 
 /**

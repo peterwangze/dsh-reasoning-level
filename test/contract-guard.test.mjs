@@ -123,3 +123,37 @@ test('(guard-5) 正常路径 contractHealth.ok=true；静态 inject = [llm, time
   assert.deepEqual(payload.contractHealth.missing, [])
   assert.ok(typeof payload.contractHealth.checkedAt === 'number')
 })
+
+// ── E. FEAT-008：peer 解析观测（contractHealth.peers fail-soft 投影）──────────
+// 形状判据：4 peer 逐名解析事实——成功 {resolved: <URL>, version: string|null}、
+// 失败 {resolved: null, reason: string}；观测失败绝不阻断启动（apply 恒完成、
+// stats 恒响应）；settings 缺席分支同投影（观测面不因数据面自禁用而丢字段）。
+test('(guard-6) contractHealth.peers：4 peer 解析事实投影（resolved+version 或 null+reason），settings 缺席分支同投影（fail-soft）', async () => {
+  const expectPeersShape = (peers, label) => {
+    assert.deepEqual(Object.keys(peers).sort(), [...hostCompat.HOST_LOADER_SEAM.peers].sort(), `${label}：键集必须 = 4 peer 名单`)
+    for (const [name, entry] of Object.entries(peers)) {
+      if (entry.resolved === null) {
+        assert.ok(typeof entry.reason === 'string' && entry.reason.length > 0, `${label}：${name} 解析失败必须带 reason（实得 ${JSON.stringify(entry)}）`)
+      } else {
+        assert.ok(typeof entry.resolved === 'string', `${label}：${name} resolved 必须是 URL 字符串`)
+        assert.ok(entry.version === null || typeof entry.version === 'string', `${label}：${name} version 必须是 string|null`)
+      }
+    }
+  }
+  // 正常路径：mount 完成（观测不阻断启动的第一重证明）+ 4 peer 全形状
+  const normal = makeCtx()
+  await mount(normal.ctx)
+  const normalPayload = (await callRoute(normal.state, STATS)).payload
+  expectPeersShape(normalPayload.contractHealth.peers, '正常路径')
+  // 本仓 devDeps 四 peer 全在场（CI npm ci 保证）——正常分支全部解析成功
+  for (const [name, entry] of Object.entries(normalPayload.contractHealth.peers)) {
+    assert.notEqual(entry.resolved, null, `正常路径 ${name} 必须解析成功（devDeps 在场；实得 ${JSON.stringify(entry)}）`)
+  }
+  // settings 缺席（可选注入未触发 → 数据面自禁用）分支：peers 同样投影——
+  // 观测面与数据面解耦，fail-soft 语义不因降级丢字段
+  const minimal = makeCtx({ deferInject: true })
+  await mount(minimal.ctx)
+  const minimalPayload = (await callRoute(minimal.state, STATS)).payload
+  assert.equal(minimalPayload.contractHealth.ok, false, '前置：settings 缺席分支确实处于降级态')
+  expectPeersShape(minimalPayload.contractHealth.peers, 'settings 缺席分支')
+})
