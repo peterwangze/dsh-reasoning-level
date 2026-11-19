@@ -93,31 +93,56 @@
   （从源码目录实测解析宿主导入面 `@deepseek-ai/schemastery` / `dsh-settings`，
   缺依赖即拒绝并引导 `file:`）——杜绝 link: 缺 node_modules 导致的整机启动失败。
 
-## 2.5 dsh 升级后第一步：宿主兼容面诊断（FEAT-002）
+## 2.5 dsh 升级后第一步：宿主兼容面诊断（FEAT-002；活树源 v2 = MAINT-043）
 
 ```powershell
-# 缺省——自动解析 $DSH_HOME||~/.dsh 下的 profiles/node_modules
+# 缺省——自动解析活树源（v2 顺序见下；桌面安装会自动定位 app.asar 并提取诊断树）
 npm run host:doctor
 
-# 显式指定宿主树（profiles 目录或其 node_modules 皆可）
+# 显式指定宿主树（profiles 目录或其 node_modules 皆可；相对/绝对路径皆可——一律归一为绝对路径）
 npm run host:doctor -- --tree C:/Users/<you>/.dsh/profiles/node_modules
+
+# 显式指定桌面版归档（自动定位未命中/安装位置非常规时）
+$env:DSH_ASAR = "D:/app/dsh/resources/app.asar"; npm run host:doctor
+
 # 判别测试同款活树断言：DSH_HOST_TREE=<树> node --test
 ```
 
+- **目标树解析顺序（v2）**：`--tree` > `DSH_HOST_TREE`（旧名
+  `DSH_HOST_PACKAGES` 保留为别名）> **桌面 asar 自动定位**（`DSH_ASAR`
+  显式指定 > 固定候选清单：本机形态 `D:\app\dsh\resources\app.asar` +
+  `%LOCALAPPDATA%\Programs\dsh\resources\app.asar` 等，全缺席则静默跳过该层）
+  > 旧缺省 `$DSH_HOME||~/.dsh` 下 `profiles/node_modules`。
+- **asar 层（桌面版布局，DSH 0.2.2-rc.1 起宿主包全量内化 app.asar——文件
+  系统上不存在 node 可直读的宿主包树）**：定位成功 → 提取归档内
+  `dsh/node_modules` 到缓存目录 `tmp/doctor-asar-cache/` → doctor 以缓存树
+  为目标树，输出标注来源（asar 路径 + 树代际）。**缓存语义**：目录内
+  marker 文件记录源 asar 路径 + size + mtime——三者未变即复用（秒级命中）；
+  归档升级/换源即整目录重提取（首轮约 180MB、数十秒，属预期）。`tmp/` 不入
+  git。`DSH_ASAR` 指向的归档不存在/损坏/无 `dsh/node_modules` 前缀 =
+  **exit 2 fail-closed**（显式指定必须可用，绝不静默回退——防假 PASS）。
+- **STALE 警示（旧缺省层）**：命中 `profiles/node_modules` 时 doctor 输出
+  醒目警示块并标注该树代际（`@deepseek-ai/dsh` 版本）——桌面版时代该树
+  可能是**非运行代的陈旧幻影树**（曾对 0.2.1-rc.2 残树跑出 12/12 假 PASS，
+  fail-open）；代际与运行实例不符时结论不可信，按警示块内处置指引切换
+  asar 层或 `--tree`。
 - **输出**：断言清单逐触点表（PASS/FAIL/DRIFT/SKIP + 一行证据）+ 宿主版本
   清单 + 逐 FAIL/DRIFT 漂移定位建议（出处台账 anchor → 锚串搜索 → 宿主
-  changelog/diff）。与判别测试共用同一探针模块（test/host-probes.mjs）——
-  测试绿 ⟺ doctor 绿，判据零分叉。全程只读零写入零网络。
+  changelog/diff）；「目标树」行带**树代际**（`@deepseek-ai/dsh` 版本）。
+  与判别测试共用同一探针模块（test/host-probes.mjs）——测试绿 ⟺ doctor 绿，
+  判据零分叉。探针全程只读零网络；doctor 唯一写入面 = asar 提取缓存目录
+  （`tmp/doctor-asar-cache/`）。asar 提取器可独立使用：
+  `node scripts/extract-asar.mjs <archive.asar> <outDir> [--prefix dsh/node_modules] [--probe]`。
 - **退出码**：`0` 无 FAIL（DRIFT 允许 0 但醒目输出）；`1` 有 FAIL；`2` 树不可
-  解析或零断言执行（先确认树布局——包不可解析 ≠ 契约 FAIL，SKIP-UNRESOLVED
-  分级归因）。
+  解析、活树源解析中止（asar 层 fail-closed）或零断言执行（先确认树布局——
+  包不可解析 ≠ 契约 FAIL，SKIP-UNRESOLVED 分级归因）。
 - **分级**：T 级（源码文本锚串）断言失败在活树 = **DRIFT**（可能是宿主重构
   而行为未变——BM-2 防误报）；在 devDeps 锁版基线 = **FAIL**（锁版不该漂）。
   B 级（vm 加载真实工件的行为判别）失败不分源恒 FAIL。
 - **双工件源**：工件源① = devDeps 锁版基线（CI 恒断言 fail-closed——锁版含
   dsh-agent-loop/dsh-llm/dsh-host-webserver，事件名/校验结构/webServer 面
   均在基线域内）；工件源② = `DSH_HOST_TREE` 活树（在场即断言/缺席即逐条
-  显式 SKIP 带原因；旧名 `DSH_HOST_PACKAGES` 保留为别名）。
+  显式 SKIP 带原因）。
 
 **DRIFT 复核 SOP（BM-2——防「忽略红灯」习惯）**：
 

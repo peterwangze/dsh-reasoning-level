@@ -225,11 +225,11 @@ dsh plugin --profile web remove dsh-reasoning-level    # 方式一
 **dsh 升级后第一步**（源码仓库内运行，分钟级给出逐触点结论）：
 
 ```sh
-npm run host:doctor                      # 缺省自动解析 ~/.dsh/profiles/node_modules
-npm run host:doctor -- --tree <宿主树>   # 显式指定（profiles 目录或其 node_modules）
+npm run host:doctor                      # 缺省自动解析活树（桌面 app.asar 自动定位+提取缓存 > ~/.dsh/profiles 旧缺省+STALE 警示）
+npm run host:doctor -- --tree <宿主树>   # 显式指定（profiles 目录或其 node_modules；DSH_ASAR 可显式指定桌面归档）
 ```
 
-输出 12 条触点的 PASS / FAIL / DRIFT / SKIP 表 + 宿主版本清单 + 漂移定位建议；退出码 `0` 无 FAIL / `1` 有 FAIL / `2` 树不可解析。与 CI 判别测试共用同一探针模块（判据零分叉），全程只读。DRIFT 处置 SOP 见 [VERIFICATION.md](./VERIFICATION.md) 第 2.5 节。
+输出 12 条触点的 PASS / FAIL / DRIFT / SKIP 表 + 宿主版本清单 + 漂移定位建议；退出码 `0` 无 FAIL / `1` 有 FAIL / `2` 树不可解析/活树源解析中止。与 CI 判别测试共用同一探针模块（判据零分叉），探针只读零网络（唯一写入面 = asar 提取缓存 `tmp/doctor-asar-cache/`）。DRIFT 处置 SOP 见 [VERIFICATION.md](./VERIFICATION.md) 第 2.5 节。
 
 ## License
 

@@ -28,7 +28,7 @@
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import vm from 'node:vm'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -55,11 +55,16 @@ export function liveSourceFromEnv(env = process.env) {
   }
 }
 
-/** profiles 目录或 node_modules 目录 → 统一归一到含 @deepseek-ai/ 的 node_modules 根。 */
+/**
+ * profiles 目录或 node_modules 目录 → 统一归一到含 @deepseek-ai/ 的
+ * node_modules 根。**一律 resolve 为绝对路径**（MAINT-043）：探针 #4 的
+ * createRequire 需要绝对路径——相对 --tree/DSH_HOST_TREE 曾致
+ * "The argument 'filename' must be a file URL object…" 崩溃（绝对路径正常）。
+ */
 export function normalizeTreeRoot(path) {
   const raw = String(path).replace(/[\\/]+$/, '')
   const segments = raw.split(/[\\/]+/)
-  return segments[segments.length - 1] === 'node_modules' ? raw : join(raw, 'node_modules')
+  return segments[segments.length - 1] === 'node_modules' ? resolve(raw) : resolve(join(raw, 'node_modules'))
 }
 
 /** 仓库 package.json 的 dsh.client.inject 声明（条目 10 判读对象，读文件非硬编码）。 */
