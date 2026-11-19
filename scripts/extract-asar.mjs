@@ -21,8 +21,9 @@
  *
  * 防御性校验（AsarFormatError，error.code === 'ASAR_FORMAT'，结构化 details）：
  * 文件过短 / 尺寸 pickle 载荷 ≠ 4 / 头载荷 ≠ H−4 / JSON 超出头载荷 / blob
- * 基址越界 / 条目 offset/size 非法或越界——一律 fail-closed 抛错，绝不静默
- * 产出错树。
+ * 基址越界 / 条目 offset/size 非法或越界 / 条目名路径段非法（Zip-Slip 防护，
+ * R0-P2：`..`·反斜杠·NUL·盘符·空段一律拒绝）/ 条目短读——一律 fail-closed
+ * 抛错，绝不静默产出错树、绝不写出目标目录之外。
  *
  * CLI：
  *   node scripts/extract-asar.mjs <archive.asar> [--probe]
@@ -35,7 +36,7 @@
 import { open, stat, mkdir, rm, readFile, writeFile, copyFile } from 'node:fs/promises'
 import { existsSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, parse, resolve } from 'node:path'
 
 /** 结构化格式错误（fail-closed：不猜格式、不静默产出错树）。 */
 export class AsarFormatError extends Error {
@@ -109,13 +110,33 @@ export async function readAsarHeader(archive) {
 }
 
 /**
- * 深度遍历头 files 树，产出 [{relPath（/ 分隔）, entry}]——仅文件条目
- * （目录节点以 entry.files 在场区分，不单独产出）。
+ * 归档头键名段校验（Zip-Slip 防护，R0-P2 返工）：条目名在被 join 消费前逐段
+ * 校验——非空、≠`.`/`..`、无反斜杠（Windows 分隔符逃逸向量）、无 NUL、非
+ * 盘符形式（`C:`/`C:\…`）。违例抛 AsarFormatError：构造/损坏归档可携带
+ * `..` 或反斜杠段把提取写出目标目录之外，fail-closed 拒绝。
  */
-export function walkAsarFiles(header) {
+function assertSafeEntrySegment(segment, archive) {
+  if (segment === '' || segment === '.' || segment === '..'
+    || segment.includes('\\') || segment.includes('\0')
+    || /^[a-zA-Z]:/.test(segment)) {
+    throw new AsarFormatError(
+      `asar 条目名含非法路径段（${JSON.stringify(segment)}——须为非空、非 ./..、无反斜杠、无 NUL、非盘符形式的普通段，Zip-Slip 防护）`,
+      { archive, segment },
+    )
+  }
+}
+
+/**
+ * 深度遍历头 files 树，产出 [{relPath（/ 分隔）, entry}]——仅文件条目
+ * （目录节点以 entry.files 在场区分，不单独产出）。每个键名段先过
+ * assertSafeEntrySegment——本函数是 extractAsar/probeAsar 等全部消费方的
+ * 单一入口（archive 参数仅用于错误定位，可省略）。
+ */
+export function walkAsarFiles(header, archive) {
   const out = []
   const walk = (node, prefix) => {
     for (const [name, entry] of Object.entries(node.files ?? {})) {
+      assertSafeEntrySegment(name, archive)
       const relPath = prefix === '' ? name : `${prefix}/${name}`
       if (entry !== null && typeof entry === 'object' && entry.files !== undefined) walk(entry, relPath)
       else out.push({ relPath, entry })
@@ -134,7 +155,7 @@ export function walkAsarFiles(header) {
  */
 export async function extractAsar({ archive, outDir, prefix = '', unpackedRoot }) {
   const info = await readAsarHeader(archive)
-  const files = walkAsarFiles(info.header)
+  const files = walkAsarFiles(info.header, info.archive)
   const selected = files.filter(({ relPath }) => prefix === '' || relPath === prefix || relPath.startsWith(`${prefix}/`))
   const unpackedBase = unpackedRoot ?? join(dirname(info.archive), 'app.asar.unpacked')
   await mkdir(outDir, { recursive: true })
@@ -173,7 +194,17 @@ export async function extractAsar({ archive, outDir, prefix = '', unpackedRoot }
         )
       }
       const buf = Buffer.alloc(size)
-      if (size > 0) await fh.read(buf, 0, size, info.dataBase + offset)
+      if (size > 0) {
+        // R0-P3：短读防御——归档在 stat 与 read 之间被并发截断/头 size 失真时
+        // bytesRead < size，静默落盘 = 字节级残缺工件，fail-closed 抛错。
+        const { bytesRead } = await fh.read(buf, 0, size, info.dataBase + offset)
+        if (bytesRead !== size) {
+          throw new AsarFormatError(
+            `asar 条目短读（${relPath}：期望 ${size} 字节实读 ${bytesRead}——归档截断或头 size 失真）`,
+            { archive: info.archive, relPath, size, bytesRead },
+          )
+        }
+      }
       await writeFile(dest, buf)
       result.extracted += 1
       result.bytes += size
@@ -189,7 +220,7 @@ export async function extractAsar({ archive, outDir, prefix = '', unpackedRoot }
  */
 export async function probeAsar(archive, prefix = '') {
   const info = await readAsarHeader(archive)
-  const files = walkAsarFiles(info.header)
+  const files = walkAsarFiles(info.header, info.archive)
   let unpacked = 0
   let underPrefix = 0
   for (const { relPath, entry } of files) {
@@ -208,11 +239,23 @@ export const ASAR_CACHE_MARKER = 'doctor-asar-cache.json'
  *    mtimeMs + prefix + 提取统计；与当前归档 stat 完全一致且提取根在场 →
  *    复用（零重提取——本机全量一轮约 180MB/数十秒，之后秒级命中）；
  *  · 任一不匹配（归档升级/换源/prefix 变更/缓存残缺）→ 清空 cacheDir 重提取；
- *  · 提取出现 unpackedMissing → 抛错（code 'ASAR_UNPACKED_MISSING'）且**不写
- *    marker**——半残树不得被后续轮复用。
+ *  · 提取失败（格式坏/条目越界/短读/unpacked 缺失）→ **同步清空部分产物**
+ *    再抛错且不写 marker——半残树既不产出也不残留（R0-P3 对齐本承诺）。
+ *  · 并发防护：**无**——手工诊断工具的单轮调用设计，同 cacheDir 并发调用
+ *    存在「检查-清空-提取」竞态（后完成者覆盖前者）；调用方（host-doctor
+ *    CLI/测试）天然串行，不强加锁。
  * 返回 { reused, root（提取出的树根 = cacheDir/<prefix 段>）, cacheDir, marker, stats }。
  */
 export async function ensureAsarTreeCache({ asarPath, cacheDir, prefix }) {
+  // R0-P3 防呆：cacheDir 空串/非字符串/文件系统根目录一律拒斥——下方
+  // rm(recursive) 绝不可指向驱动器根（resolve('') = cwd，故先查原始值）。
+  if (typeof cacheDir !== 'string' || cacheDir.trim() === '') {
+    throw new Error(`ensureAsarTreeCache: 非法 cacheDir（${JSON.stringify(cacheDir)}——不得为空串/非字符串）`)
+  }
+  const resolvedCacheDir = resolve(cacheDir)
+  if (resolvedCacheDir === parse(resolvedCacheDir).root) {
+    throw new Error(`ensureAsarTreeCache: 非法 cacheDir（${JSON.stringify(cacheDir)}——不得为文件系统根目录 ${resolvedCacheDir}）`)
+  }
   const resolvedAsar = resolve(asarPath)
   const asarStat = await stat(resolvedAsar) // 缺失 → ENOENT 原样上抛（调用方存在性检查前置）
   const root = join(cacheDir, ...prefix.split('/'))
@@ -232,14 +275,22 @@ export async function ensureAsarTreeCache({ asarPath, cacheDir, prefix }) {
     return { reused: true, root, cacheDir, marker, stats: marker.stats ?? null }
   }
   await rm(cacheDir, { recursive: true, force: true })
-  const stats = await extractAsar({ archive: resolvedAsar, outDir: cacheDir, prefix })
-  if (stats.unpackedMissing > 0) {
-    throw Object.assign(
-      new Error(
-        `asar unpacked 条目缺失 ${stats.unpackedMissing} 个（源 ${resolvedAsar}，如 ${stats.missingPaths.slice(0, 3).join(', ')}）——app.asar.unpacked 与归档不配套，拒绝产出半残树`,
-      ),
-      { code: 'ASAR_UNPACKED_MISSING', missingPaths: stats.missingPaths },
-    )
+  let stats
+  try {
+    stats = await extractAsar({ archive: resolvedAsar, outDir: cacheDir, prefix })
+    if (stats.unpackedMissing > 0) {
+      throw Object.assign(
+        new Error(
+          `asar unpacked 条目缺失 ${stats.unpackedMissing} 个（源 ${resolvedAsar}，如 ${stats.missingPaths.slice(0, 3).join(', ')}）——app.asar.unpacked 与归档不配套，拒绝产出半残树`,
+        ),
+        { code: 'ASAR_UNPACKED_MISSING', missingPaths: stats.missingPaths },
+      )
+    }
+  } catch (error) {
+    // R0-P3：提取失败路径同步清空部分产物——不留半残树（此前 unpackedMissing
+    // 分支抛错后残留半提取目录，与 docblock 承诺不符）。
+    await rm(cacheDir, { recursive: true, force: true }).catch(() => {})
+    throw error
   }
   const nextMarker = {
     version: 1,

@@ -15,7 +15,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import {
   AsarFormatError, readAsarHeader, walkAsarFiles, extractAsar, probeAsar,
   ensureAsarTreeCache, ASAR_CACHE_MARKER,
@@ -100,6 +100,51 @@ test('(MAINT-043) extractAsar：unpacked 实体缺失 → 计数 + missingPaths�
 })
 
 // ── 防御校验（负相——结构化 AsarFormatError，绝不静默产出错树）──────────────
+// Zip-Slip 防护（R0-P2 返工）：归档头键名段在被 join 消费前逐段校验。
+// 判别性说明：无防护时 join(outDir, '..', 'x') / join(outDir, 'a\\..\\..\\x')
+// 会 normalize 逃出 outDir——故每个用例都断言逃逸目标文件**不存在**（旧码可红）。
+test('(MAINT-043 rework) Zip-Slip 防御：条目名含 .. 段 → 拒绝且不写出 outDir 之外', async (t) => {
+  const dir = tempDir(t)
+  const built = buildMicroAsar(join(dir, 'src'), [
+    { path: 'dsh/node_modules/ok.txt', content: 'ok' },
+    { path: '../escape.txt', content: 'EVIL' },
+  ])
+  const outDir = join(dir, 'out')
+  await assert.rejects(
+    () => extractAsar({ archive: built.asarPath, outDir, prefix: '' }),
+    (error) => error instanceof AsarFormatError && error.code === 'ASAR_FORMAT' && error.message.includes('路径段'),
+  )
+  assert.equal(existsSync(join(dir, 'escape.txt')), false, 'join(outDir, .., escape.txt) 逃逸文件必须不存在')
+  assert.equal(existsSync(join(outDir, 'escape.txt')), false)
+})
+
+test('(MAINT-043 rework) Zip-Slip 防御：条目名含反斜杠段（Windows 逃逸向量）→ 拒绝', async (t) => {
+  const dir = tempDir(t)
+  const built = buildMicroAsar(join(dir, 'src'), [
+    { path: 'dsh/node_modules/ok.txt', content: 'ok' },
+    { path: 'up\\..\\..\\escape.txt', content: 'EVIL' },
+  ])
+  const outDir = join(dir, 'out')
+  await assert.rejects(
+    () => extractAsar({ archive: built.asarPath, outDir, prefix: '' }),
+    (error) => error instanceof AsarFormatError && error.code === 'ASAR_FORMAT' && error.message.includes('路径段'),
+  )
+  assert.equal(existsSync(join(dir, 'escape.txt')), false, 'join 后 normalize 的反斜杠 .. 逃逸必须被阻止')
+})
+
+test('(MAINT-043 rework) Zip-Slip 防御：空段/盘符形式/NUL 段 → walkAsarFiles 拒绝', (t) => {
+  const dir = tempDir(t)
+  const cases = ['/etc/passwd', 'C:/evil.txt', 'evil\0name.txt']
+  for (const malicious of cases) {
+    const built = buildMicroAsar(join(dir, 'src'), [{ path: malicious, content: 'x' }])
+    assert.throws(
+      () => walkAsarFiles(built.header),
+      (error) => error instanceof AsarFormatError && error.code === 'ASAR_FORMAT',
+      `恶意条目名 ${JSON.stringify(malicious)} 必须被段校验拒绝`,
+    )
+  }
+})
+
 test('(MAINT-043) 防御校验：尺寸 pickle 载荷 ≠ 4 → AsarFormatError(ASAR_FORMAT)', async (t) => {
   const dir = tempDir(t)
   const built = buildMicroAsar(dir, [{ path: 'a.txt', content: 'x' }])
@@ -216,6 +261,33 @@ test('(MAINT-043) ensureAsarTreeCache：源归档 mtime 变脏 → 清缓存重�
   assert.equal(existsSync(sentinel), false, '脏检查失败必须清空缓存重提取')
 })
 
+test('(MAINT-043 rework) ensureAsarTreeCache：cacheDir 防呆——空串/根目录拒斥', async () => {
+  const anyAsar = join(tmpdir(), 'whatever.asar') // 防呆先于源归档 stat，无需真实存在
+  await assert.rejects(
+    () => ensureAsarTreeCache({ asarPath: anyAsar, cacheDir: '', prefix: 'dsh/node_modules' }),
+    /cacheDir/,
+  )
+  await assert.rejects(
+    () => ensureAsarTreeCache({ asarPath: anyAsar, cacheDir: parse(tmpdir()).root, prefix: 'dsh/node_modules' }),
+    /根目录/,
+  )
+})
+
+test('(MAINT-043 rework) ensureAsarTreeCache：提取失败（恶意归档/格式错）→ 清空部分产物不留半残树', async (t) => {
+  const dir = tempDir(t)
+  const built = buildMicroAsar(join(dir, 'src'), [
+    { path: 'dsh/node_modules/ok.txt', content: 'ok' },
+    { path: '../escape.txt', content: 'EVIL' },
+  ])
+  const cacheDir = join(dir, 'cache')
+  await assert.rejects(
+    () => ensureAsarTreeCache({ asarPath: built.asarPath, cacheDir, prefix: '' }),
+    (error) => error instanceof AsarFormatError,
+  )
+  assert.equal(existsSync(cacheDir), false, '提取失败路径必须同步清空部分产物（R0-P3：不留半残树）')
+  assert.equal(existsSync(join(dir, 'escape.txt')), false)
+})
+
 test('(MAINT-043) ensureAsarTreeCache：unpacked 缺失 → 拒绝产出半残树（不写 marker）', async (t) => {
   const dir = tempDir(t)
   const built = buildMicroAsar(dir, [
@@ -228,4 +300,5 @@ test('(MAINT-043) ensureAsarTreeCache：unpacked 缺失 → 拒绝产出半残�
     (error) => error?.code === 'ASAR_UNPACKED_MISSING' && Array.isArray(error.missingPaths),
   )
   assert.equal(existsSync(join(cacheDir, ASAR_CACHE_MARKER)), false, '半残树不得写 marker（防后续轮复用）')
+  assert.equal(existsSync(cacheDir), false, 'unpacked 缺失路径同样清空部分产物（不留半残树）')
 })
