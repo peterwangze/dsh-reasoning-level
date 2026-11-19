@@ -43,13 +43,27 @@ function buildStaleProfilesHome(dir, version = '0.0.1-stale') {
 
 // ── 层①：--tree（绝对路径化——探针 #4 崩溃修复的判别锚）────────────────────
 test('(MAINT-043) 相对 --tree 归一化为绝对路径（修复探针 #4 createRequire 崩溃）', async () => {
-  const byNodeModules = await resolveTargetTree('rel/trees/node_modules', { env: {} })
-  assert.equal(byNodeModules.root, resolve('rel/trees/node_modules'))
+  // 平台中立夹具（CI Linux 红→绿修复，run 44457978424）：相对输入用 path.join
+  // 构造（平台分隔符），期望值 = 对**同一输入** resolve——两侧同源，零平台字面量。
+  // （旧夹具硬编码 Windows 反斜杠输入 + 正斜杠期望：POSIX 上 resolve 不把 `\`
+  // 当分隔符，路径语义分叉。）
+  const relTree = join('rel', 'trees', 'node_modules')
+  const byNodeModules = await resolveTargetTree(relTree, { env: {} })
+  assert.equal(byNodeModules.root, resolve(relTree))
   assert.ok(isAbsolute(byNodeModules.root), '探针 #4 createRequire 需要绝对路径')
   assert.equal(byNodeModules.origin, '--tree')
-  const byProfilesDir = await resolveTargetTree('rel\\trees\\profiles-dir\\', { env: {} })
-  assert.equal(byProfilesDir.root, resolve(join('rel/trees/profiles-dir', 'node_modules')))
+  const relProfiles = join('rel', 'trees', 'profiles-dir')
+  const byProfilesDir = await resolveTargetTree(relProfiles, { env: {} })
+  assert.equal(byProfilesDir.root, resolve(join(relProfiles, 'node_modules')))
   assert.ok(isAbsolute(byProfilesDir.root))
+  // Windows 语义保形：反斜杠（含混合分隔符/尾随分隔符）输入在 win32 上同样被
+  // 归一为绝对路径——normalizeTreeRoot 的去尾正则与 split 均跨平台识别两种
+  // 分隔符。POSIX 上 `\` 是合法文件名字符、不构成路径语义，故本变体仅 win32 断言。
+  if (process.platform === 'win32') {
+    const byBackslash = await resolveTargetTree('rel\\trees\\profiles-dir\\', { env: {} })
+    assert.equal(byBackslash.root, resolve(join(relProfiles, 'node_modules')))
+    assert.ok(isAbsolute(byBackslash.root))
+  }
 })
 
 // ── 解析顺序 ───────────────────────────────────────────────────────────────
