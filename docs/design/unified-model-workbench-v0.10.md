@@ -43,7 +43,7 @@
 
 - `lib/index.js`：`Config` schema（`enabled/level/models/syncDefaultAgent/purposes/statsPublic/probeBlacklist/probeEfforts/applied/lastProbe`）；`applyPiAi` 写 `llm-pi-ai.providers[*].models[].reasoningEfforts` 与路由 `reasoning`；`applyDeepseekRoute` 写 `llm-deepseek*.reasoningEffort`；`agent/request` 与 `llm/stream` 注入 effort；stats 端点 `/reasoning-level-stats`；probe 端点 `/probe`、`/probe/apply`。
 - `lib/client.js`：单文件 2,594 行，`settings.section` 单页；`hostApiFace` 适配 remote.settings / remote.session.modelCatalog；`STYLESHEET` 为 `.rl-*` 设计系统。
-- 测试：双树 `node --test`（主树 0.2.1-rc.2 + `tmp/compat-022` 0.2.2-rc.1 镜像）、`client-smoke`、`host:doctor`。
+- 测试：双树 `node --test`（主树 0.2.1-rc.2 + `tmp/compat-022rc5` 0.2.2-rc.5 镜像）、`client-smoke`、`host:doctor`。
 
 ### 2.3 top_p / top_k 的诚实边界
 
