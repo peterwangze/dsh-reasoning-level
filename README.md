@@ -2,7 +2,7 @@
 
 > DeepSeek Harness（DSH）统一模型管理插件：**一个设置页管理所有模型的思考强度、多模态能力与采样参数**——含全局默认、预设、模型级覆盖与实时调用观测。
 
-[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.10.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
+[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.11.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
 
 ---
 
@@ -22,6 +22,7 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 
 ## 功能特性
 
+- **增量探测**（v0.11.0）：「一键探测思考档位」只重测「从未探测 / 上次失败 / 声明待固化 / 新加入配置」的模型，其余沿用上次持久化结果；观测视图新增「全量重探」兜底
 - **统一模型管理工作台**（v0.10.0）：设置页四视图（模型 / 默认与预设 / 观测 / 诊断），按模型提供商分组、搜索、筛选、行内摘要 + 展开详情
 - **多模态能力配置**（v0.10.0）：按模型开关图像输入，写回 pi-ai `models[].input` / `modelOverrides[].input` 与 DeepSeek `models[].inputModalities`；带 previous 台账，撤销只恢复插件写入值，用户手改不覆盖
 - **采样参数**（v0.10.0）：temperature / maxTokens 真实注入（只填调用方未给出的值）；topP / topK 可保存并标注「预留」——DSH 0.2.2 的 `GenerateOptions` / `LlmCallControls` 无对应字段，宿主支持后经 `lib/param-registry.js` 扩展点启用
@@ -39,9 +40,9 @@ DSH 接入的多服务商模型（DeepSeek 官方、智谱、聚合网关、自�
 - **off 线值按协议细化**（v0.4.0）：zai/deepseek thinking 格式下 off 显式发送 `disabled`（默认开启思考的模型真正关闭），openai 系缺省
 - **purpose 级默认**（v0.4.0）：`purposes.compaction` / `purposes.session-title` 独立等级（辅助调用可用 off 省 token）
 - **实测按钮**（v0.4.0）：统计面板发 1-token 请求验证某模型某等级实际可用；网关拒绝仅作为该次探测的拒绝结果返回，不入黑名单（探测是"测量"不是调用）
-- **一键探测并固化配置**（v0.7.0；v0.10.0 起上移页头并更名为「一键探测思考档位（写回模型能力声明）」）：**一个按钮**探测全部模型的全部候选思考档位——实测可用的档位自动写回模型能力声明并持久化（**只改思考档位，不动采样参数、多模态与全局默认**）；实测拒绝的档位仅作为该次探测结果的拒绝列表返回（不入黑名单、不跨次生效）；每次探测全量重测全部候选档位，历史误判不会卡死后续探测；限流/超时等错误与"档位不可用"严格区分，不再误判
+- **一键探测并固化配置**（v0.7.0；v0.10.0 起上移页头并更名为「一键探测思考档位（写回模型能力声明）」；**v0.11.0 起增量探测**）：**一个按钮**探测模型的候选思考档位——实测可用的档位自动写回模型能力声明并持久化（**只改思考档位，不动采样参数、多模态与全局默认**）；实测拒绝的档位仅作为该次探测结果的拒绝列表返回（不入黑名单、不跨次生效）。**增量语义**：先经 `POST /reasoning-level-stats/probe/plan` 取计划，只实测「从未探测 / 上次有阻塞档位 / 写回失败 / 声明待固化 / 上次不在配置现已加入」的模型，其余沿用 `lastProbe` 并标注「沿用上次结果」；计划不可用自动回退全量；探测失败不写回、不改写上次结论；限流/超时等错误与"档位不可用"严格区分；「全量重探」按钮可忽略已有结果重测全部模型
 - **探测可用性修复**（v0.7.0）：修复 v0.4 以来探测"全部显示失败"的根因——测试请求的 `Message.content` 必须是 ContentBlock 数组，旧代码传字符串导致适配器在组装阶段就报 `content.some is not a function`（与模型是否支持等级无关）；探测请求标记旁路统计（不污染观测数据），单次 30s 超时、单模型并发 3，探测中的请求全部带 `probe` 标记免污染；（v0.7.2 起同模型并发 /probe 走互斥队列串行化——重复点击/双窗口不互相覆盖临时声明与收敛结果）
-- **能力声明持久化**（v0.7.0）：`llm-reasoning.probeEfforts`（实测能力声明）落盘 settings.yaml，重启后不再被生成表覆盖/升级，实测结果即真值；用户手写的模型声明不会被探测覆盖（v0.7.2 起并入语义：保留手写档位与 wire，实测可用的新档位自动追加；本插件生成或未声明的声明按实测 working 集替换，取代早期"永不覆盖"表述）。（v0.7.1 起黑名单改为仅当前会话内存态：`probeBlacklist` 字段兼容保留，不再写入也不再作为过滤依据——每次探测全量重测，历史误判不跨次生效，既有数据零破坏）
+- **能力声明持久化**（v0.7.0）：`llm-reasoning.probeEfforts`（实测能力声明）落盘 settings.yaml，重启后不再被生成表覆盖/升级，实测结果即真值；用户手写的模型声明不会被探测覆盖（v0.7.2 起并入语义：保留手写档位与 wire，实测可用的新档位自动追加；本插件生成或未声明的声明按实测 working 集替换，取代早期"永不覆盖"表述）。（v0.7.1 起黑名单改为仅当前会话内存态：`probeBlacklist` 字段兼容保留，不再写入也不再作为过滤依据——需重测的模型全量重测全部候选档位（v0.11.0 起增量语义：哪些模型需重测见上条），历史误判不跨次生效，既有数据零破坏）
 - **CSV 导出 + 建议列**（v0.4.0）：统计一键导出 CSV；聚合表显示错误率/实测拒绝建议
 - **i18n 基础**（v0.5.0）：client 接入 locale（zh/en 标题与区块）
 - **事故加固**（v0.6.0，[VERIFICATION.md](./VERIFICATION.md)）：`dependencies` 清零、宿主包全 peer（`*`）对齐 DSH out-of-tree 官方契约；安装全面改走 `dsh plugin` 通道（不再 junction 共享树/手改 patch/写 settings）；全部注册与钩子失败就地降级，绝不允许升级为 DSH 启动失败；修复设置页统计面板 `t is not defined` 渲染崩溃；新增渲染冒烟测试与依赖策略 CI 门禁
@@ -130,10 +131,10 @@ dsh plugin --profile web add file:/path/to/dsh-reasoning-level     # 再重新�
 |---|---|
 | 模型 | 按**模型提供商**分组列出全部模型。每行一个「配置来源」开关（跟随全局 ↔ 自定义）+ 只读摘要；点击行展开详情，按维度设置**思考强度**、**多模态**、**采样参数**。支持搜索、提供商筛选、仅显示自定义 |
 | 默认与预设 | 全局默认思考强度（分段控件 + 影响预览）、采样预设（精确 / 均衡 / 创意 / 自定义）、全局默认采样参数、辅助调用等级（会话压缩 / 会话标题） |
-| 观测 | 实时调用统计（可暂停轮询、只看异常、按列排序）、按模型聚合（等级分布 / 思考 / 输出 / 平均耗时 / 错误率）、等级对比、最近调用、探测结果与能力声明结局 |
+| 观测 | 实时调用统计（可暂停轮询、只看异常、按列排序）、按模型聚合（等级分布 / 思考 / 输出 / 平均耗时 / 错误率）、等级对比、最近调用、探测结果与能力声明结局；工具栏「全量重探（忽略已有结果）」 |
 | 诊断 | 宿主契约健康、探测与能力声明、路由与模型能力矩阵、导出 CSV |
 
-页头是页面最重的动作 **一键探测思考档位（写回模型能力声明）**——只测思考档位，不修改采样参数、多模态与全局默认。
+页头是页面最重的动作 **一键探测思考档位（写回模型能力声明）**——只测思考档位，不修改采样参数、多模态与全局默认。v0.11.0 起为**增量探测**：服务端按 `lastProbe` 判定哪些模型需要重测，其余沿用上次结果（结果表标注「沿用上次结果」）；模型能力真变化或手工改过声明时用观测视图的「全量重探」。
 
 > **v0.10.0 界面重构**：从「推理等级单页」升级为「统一模型管理工作台」。行级「跟随全局」表示思考强度、多模态、采样参数**全部**继承全局；任一项在详情里设为自定义后，行级自动显示「自定义」。数字参数改为**失焦或回车才提交**，输入过程中不会保存。第三方插件产生的 `xxx-router` 路由版对用户**完全隐藏**（写入时内部与主版本同步）。所有既有写路径与配置语义零变更。
 
@@ -187,7 +188,7 @@ llm-reasoning:
 
 > **关于 topP / topK**：可写入 `modelParams` 并随工作台迁移，但 DSH 0.2.2 的 `GenerateOptions` / `LlmCallControls` 没有这两个字段，插件**不会**把它们发到网关；界面统一标注「预留」。宿主将来支持时，在 `lib/param-registry.js` 把该参数的 `hostSupport` 改为 `active` 并补 `apply` 即可启用。
 
-> ⚠️ **安全警示（v0.7.0）**：`statsPublic: true` 时统计端点允许 LAN 访问，**新增的 `/reasoning-level-stats/probe` 与 `/reasoning-level-stats/probe/apply` 端点随之开放**——LAN 内任何设备无需认证即可触发 1-token 实测请求（产生 LLM 成本），并可写入模型能力声明与 `probeEfforts` 配置。默认请保持回环（`statsPublic: false`）；确需 LAN 暴露时请先在可信网络中评估风险。
+> ⚠️ **安全警示（v0.7.0；v0.11.0 增补）**：`statsPublic: true` 时统计端点允许 LAN 访问，**新增的 `/reasoning-level-stats/probe`、`/reasoning-level-stats/probe/apply` 与 `/reasoning-level-stats/probe/plan` 端点随之开放**——LAN 内任何设备无需认证即可触发 1-token 实测请求（产生 LLM 成本），并可写入模型能力声明与 `probeEfforts` 配置（`/probe/plan` 只读）。默认请保持回环（`statsPublic: false`）；确需 LAN 暴露时请先在可信网络中评估风险。
 
 插件运行时自动维护：`llm-pi-ai.providers.<route>.models[].reasoningEfforts`（能力声明，含旧版自动升级）、`llm-pi-ai.providers.<route>.reasoning`（路由默认）、`llm-deepseek.reasoningEffort`。
 

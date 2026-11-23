@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.11.0 (2026-11-23)
+
+### Added
+- **增量探测（FEAT-009）**：「一键探测思考档位」不再每次重测全部模型——先向新增的 `POST /reasoning-level-stats/probe/plan` 取计划，只实测「从未探测 / 上次有阻塞档位 / 写回失败 / 声明待固化」的模型，其余沿用上次持久化结果（`llm-reasoning.lastProbe`），结果表标注「沿用上次结果」。本机活体实测（v0.11.0 真机 `/probe/plan`，14 个模型目录）：5 个需重测 / 9 个沿用，请求数 98 → 35、参与固化的模型数 14 → 5。判定逻辑抽为纯模块 `lib/probe-plan.js`（零宿主依赖）。
+- **新配置的模型自动重测**：从未探测的模型，以及「上次因不在 llm-pi-ai 配置而仅展示、之后已加入配置」的模型，都会被重测并固化（计划原因 `config-changed`）。
+- **全量重探（FEAT-009）**：观测视图工具栏新增「全量重探（忽略已有结果）」按钮——供应商升级模型能力、或手工改动过能力声明时使用。
+- **host-doctor 活树源 v2（MAINT-043）**：桌面版宿主包内化 `app.asar` 后自动定位/提取活树（`tmp/doctor-asar-cache` 脏检查）+ 代际守卫 + Zip-Slip 段校验；旧缺省幻影树改为醒目 STALE 警示；相对 `--tree` 归一化为绝对路径；`scripts/extract-asar.mjs` 零依赖 asar 读取器。
+- **加载器接缝档案化（FEAT-008）**：桌面加载器解析契约入 `HOST_LOADER_SEAM`（S13 台账）+ doctor 探针 #13 + `contractHealth.peers` 观测（fail-soft）。
+
+### Changed
+- **探测失败不污染结果**：探测请求失败（超时/断网/服务端返回 `error`）只显示在本次结果表，不写回能力声明、不改写 `lastProbe`——该模型下次仍会被重测。客户端与服务端双侧守卫（`/probe/apply` 跳过带 `error` 的结果行）。
+- **计划不可用自动回退**：`/probe/plan` 网络错误 / 非 2xx / 响应形状不符 / 计划未覆盖全部目标 → 回退为全量探测，行为与旧版一致。
+- **探测健壮性**：重复点击守卫（同步连点只跑一轮）；任何异常 `finally` 复位「测试中」状态；计划请求独立 15s 超时。
+- **看护基线轮换（MAINT-044）**：compat 镜像树升级到 DSH 0.2.2-rc.5（dsh-* 0.2.2-rc.5 + cordis 4.1.0 + schemastery 3.19.0 + zod 4.6.6）。
+
+### Fixed
+- `host-doctor` 相对 `--tree` 在 Linux 上的夹具平台性问题（CI run 44457978424 红→绿，MAINT-043 返工）。
+
+### Notes
+- 版本 0.10.0 → 0.11.0（MINOR）。配置 schema 无变更（`lastProbe` 形状不变），旧配置零迁移；新增端点 `/probe/plan` 与既有 `/probe` 同回环门控。
+- 安装或更新后请**完全退出并重开 DSH**，以加载新的 server 代码。
+- 操作边界：手工清空/修改某模型的 `llm-pi-ai` 能力声明后，增量不会自动恢复——请用「全量重探」（MAINT-046 后续评估当前态对账）。
+- 质量依据：主树 **321/321**；`client-smoke` OK；`host:doctor` 13/13 PASS DRIFT=0；`npm pack` 13 files；独立 Code Reviewer R0 **NEEDS_CHANGE/1**（失败探测行被固化）→ R1 **APPROVED_WITH_NOTES/0**；Release Reviewer R0 **APPROVED_WITH_NOTES/0**。
+
 ## 0.10.0 (2026-11-11)
 
 ### Added

@@ -1,4 +1,4 @@
-# dsh-reasoning-level 验证协议（v0.10.0）
+# dsh-reasoning-level 验证协议（v0.11.0）
 
 > 本文是「插件不得拖垮宿主」的工程契约：从一次真实事故复盘出发，给出
 > **架构约束（为什么）、实现规约（怎么防）、验证流程（怎么证）** 三层防线。
@@ -86,6 +86,13 @@
     （保留用户档位，实测可用的新档位自动追加），本插件生成/未声明的声明
     替换为 working 集；（v0.7.2 MAINT-017：并入语义取代"永不覆盖"，7 键全量
     声明识别为生成形状——自动升级而非误判手写）
+  - 增量探测（v0.11.0 FEAT-009）：客户端先 `POST /probe/plan`（回环门控同 `/probe`，
+    独立 15s 超时）取 `{probe, skip}`——判定单源 `lib/probe-plan.js`（纯模块）：
+    从未探测 / 有阻塞档位 / 写回失败 / 声明待固化 / 上次不在配置现已加入 → 重测，
+    其余沿用 `lastProbe`；计划不可用（网络 / 非 2xx / 形状不符 / 未覆盖全部目标）
+    → 回退全量。**失败探测行（fetch reject 或响应带 `error`）不进入 `/probe/apply`**，
+    服务端同样跳过带 `error` 的结果行——不改写声明、不改写 `lastProbe`，该模型下次
+    仍判需重测（R0 P1 教训：一次超时曾把待固化模型固化为 `skipped:*` 定论）。
   - 固化写走既有 `settings.replace` 整节替换 + `settings/updated` 收敛路径，
     不新增写面。
 - 安装器（install.ps1 / install.sh）：清理旧残留（只删链接本体）、安装前
@@ -202,10 +209,21 @@ dsh --profile canary web          # 观察启动日志无 failed fiber / 无等�
 #    b. 设置 → 统一模型管理 → 页面正常渲染（四视图）、统计 2s 内出现记录
 #    c. curl http://127.0.0.1:<port>/reasoning-level-stats → 200 + JSON
 #    d. 切换全局等级 high ↔ max → 下一条消息统计里 effort 列变化
-#    e. 设置页点「一键探测思考档位（写回模型能力声明）」→ 逐模型出结果（可用/拒绝/其他），
+#    e. 设置页点「一键探测思考档位（写回模型能力声明）」→ 先取 /probe/plan，只实测
+#       需重测模型（从未探测/失败/待固化/新入配置），其余标注「沿用上次结果」；
 #       完成后能力声明写入 settings.yaml（llm-reasoning.probeEfforts）；黑名单仅
 #       当前会话内存态（stats 端点 payload.blacklist 可见，不再写 probeBlacklist）；
 #       curl POST /reasoning-level-stats/probe/apply 幂等返回修正后的写入数
+#    f. 增量生效判据：先取计划（见下，targets 取自 GET /reasoning-level-models 的
+#       models[] 并过滤 provider 以 -router 结尾）核对 probe 列表 == 页面实测列表；
+#       再点一次前**重新取计划**（首次后 never-probed→settled，旧计划已过期）→
+#       摘要实测数 == 新计划 probe 数（全部定论时显示「均已有上次探测结果」零实测；
+#       若计划仍含 blocked-levels 模型，则只实测这些模型——不是失败）；
+#       观测视图「全量重探」→ 全部模型重新实测（兜底生效）
+#       PowerShell（5.1 / 7 均实测可用）：
+#         Invoke-RestMethod -Method Post -Uri http://127.0.0.1:<port>/reasoning-level-stats/probe/plan -ContentType 'application/json' -Body '{"targets":[{"provider":"p","model":"m"}]}' | ConvertTo-Json -Compress
+#       bash：
+#         curl -s -X POST http://127.0.0.1:<port>/reasoning-level-stats/probe/plan -H 'content-type: application/json' -d '{"targets":[{"provider":"p","model":"m"}]}'
 
 # 4) 清理
 dsh plugin --profile canary remove dsh-reasoning-level
