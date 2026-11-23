@@ -43,9 +43,10 @@ RCA 2026-10-20 起 `ctx.inject` **按依赖名分派**（['settings'] / ['webSer
 - `gate-access.test.mjs` 403 门控：非回环 + statsPublic=false 拒绝（stats/probe/test/apply），
   statsPublic=true 放行，回环 Host 变体矩阵；
 - `http-endpoints-late-service.test.mjs` **RCA 2026-10-20 守卫**（webServer 晚到）：
-  apply 期无服务 → 四端点不注册且不抛错；provideWebServer() 后四端点全挂 + stats 200
-  合法 JSON；重复 provide / 同实例二次注入不双注册；无 ctx.inject 表面回退 eager
-  ctx.get；服务重启（新实例）→ 旧路由随 scope effect 销毁 + 新实例重挂；
+  apply 期无服务 → 六端点（含 FEAT-009 `/probe/plan`）不注册且不抛错；provideWebServer()
+  后六端点全挂 + stats 200 合法 JSON；重复 provide / 同实例二次注入不双注册；无
+  ctx.inject 表面回退 eager ctx.get；服务重启（新实例）→ 旧路由随 scope effect 销毁 +
+  新实例重挂；
 - `probe-errors.test.mjs` err 分支：no candidate levels / not-in-pi-ai-config /
   already-verified / 空 results / 空 body（400）/ /test 端点成功路径；
 - `probe-timeout.test.mjs` 30s abort：中止定时器 30000ms 挂载 + 触发后 blocked 分类
@@ -70,7 +71,20 @@ RCA 2026-10-20 起 `ctx.inject` **按依赖名分派**（['settings'] / ['webSer
 - `probe-enum-rejection.test.mjs` **枚举式拒绝归类守卫**（2026-10-21 真机反馈）：网关
   用 `Invalid option: expected one of "off"|…` 拒绝某档时归 `rejected` 而非 `blocked`；
   反例三条同时锁定——枚举里**含**该档仍归 blocked、effort 词 <3 个不臆断、传输类错误
-  不被枚举规则吞掉。
+  不被枚举规则吞掉；
+- `probe-plan.test.mjs` **FEAT-009 增量探测决策守卫**：never-probed / probe-error /
+  blocked-levels / persist-error / pending-apply / settled 判定顺序；force 全量兜底；
+  malformed targets 不计 total；skip 快照 sanitize；`skipped:not-in-pi-ai-config` +
+  已加入 pi-ai 配置 → config-changed 重测；
+- `probe-plan-endpoint.test.mjs` **FEAT-009 计划端点**：混合计划分类与 total 对账、
+  force、非回环 403、空 body 空计划、纯只读（零 llm.stream / 零设置写）、
+  config-changed 对账；
+- `probe-apply-error.test.mjs` **FEAT-009 R1/P1-1 守卫**：带 error 的失败探测行不参与
+  固化（零 outcome / 零声明写 / 零 lastProbe 写），增量计划继续判需重测；负相锁定
+  无 error 空 working 仍走既有 no-working-levels 语义；
+- `client-probe-incremental.test.mjs` **FEAT-009 客户端增量编排**：先取 plan 再只实测
+  probe、skip 行 kept 复用、apply 只发本轮实测、三态摘要、force 全量重探，以及计划
+  失败/形状不符/网络异常回退全量探测；
 
 ## 手动视觉校验（不参与 CI）
 

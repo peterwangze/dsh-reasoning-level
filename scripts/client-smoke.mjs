@@ -904,7 +904,28 @@ const probeApplied = {
     { key: 'demo/m4', reason: 'no-working-levels' },
   ],
 }
+// FEAT-009：增量探测先取计划——冒烟返回「4 个模型全部需要实测」的计划，
+// 保持 2j 的三态计数断言语义不变（apply 仍由下面的桩返回同一份 skipped）。
+let probePlanCalls = 0
 sandbox.fetch = async (url, init) => {
+  if (url === '/reasoning-level-stats/probe/plan') {
+    probePlanCalls += 1
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        probe: [
+          { provider: 'demo', model: 'm1', key: 'demo/m1', reason: 'never-probed' },
+          { provider: 'demo', model: 'm2', key: 'demo/m2', reason: 'never-probed' },
+          { provider: 'demo', model: 'm3', key: 'demo/m3', reason: 'never-probed' },
+          { provider: 'demo', model: 'm4', key: 'demo/m4', reason: 'never-probed' },
+        ],
+        skip: [],
+        total: 4,
+        force: false,
+      }),
+    }
+  }
   if (url === '/reasoning-level-stats/probe/apply') {
     return { ok: true, status: 200, json: async () => probeApplied }
   }
@@ -945,6 +966,11 @@ if (!probeDiagText.includes('不修改采样参数')) {
 }
 probeButton.props.onClick()
 await sleep(80)
+// FEAT-009：点击探测必须先走 /probe/plan（增量路径被实驱），而不是直接全量实测。
+if (probePlanCalls < 1) {
+  console.error('smoke: probe-all must consult /reasoning-level-stats/probe/plan before measuring (FEAT-009 incremental path) — got ' + probePlanCalls + ' plan calls')
+  process.exit(1)
+}
 const { stats: probeDoneStats } = await renderPageStats()
 const probeSummaryText = textOf(probeDoneStats[1](probeDoneStats[2]))
 for (const expected of [
