@@ -430,7 +430,9 @@ test('(FEAT-009/E) 探测失败行不进入 /probe/apply（P1 回归）', async 
   assert.ok(table, 'probe results table must render')
   assert.ok(textOf(table).includes('探测请求失败'), 'failed row must show the probe-failure text — got ' + textOf(table))
   const summary = findByClass(statsTree, 'rl-probe-summary')
-  assert.ok(summary === null || !textOf(summary).includes('写回'),
+  // E 的意图：不得出现 probeDone 的「成功写回 N 处」计数（MAINT-047 N2 起全失败时摘要
+  // 披露「N 个探测失败，未写回」——这是失败说明，不是成功计数，故按 probeDone 特征片段判）。
+  assert.ok(summary === null || !/写回 \d+ 处/.test(textOf(summary)),
     'summary must not report a probeDone write count — got ' + (summary === null ? '(no summary)' : textOf(summary)))
 })
 
@@ -578,3 +580,160 @@ test('(FEAT-009/G2) 计划覆盖不全：整份作废并回退全量探测（P3-
   assert.ok(!summaryText.includes('本次增量实测'), 'invalid plan must not claim incremental semantics — got ' + summaryText)
 })
 
+
+test('(MAINT-047/I) /probe 非 2xx 且 body 无 error：不进入 apply（N1 response.ok 守卫）', async () => {
+  const h = createHarness(
+    () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        probe: [{ provider: 'demo', model: 'm1', key: 'demo/m1', reason: 'never-probed' }],
+        skip: [],
+        total: 1,
+        force: false,
+      }),
+    }),
+    // 502 但 body 是「看似正常」的结果（无 error 字段）：没有 response.ok 守卫时会被当成功行固化
+    () => ({
+      ok: false,
+      status: 502,
+      json: async () => ({ provider: 'demo', model: 'm1', key: 'demo/m1', working: ['low'], rejected: [], blocked: [] }),
+    }),
+    [{ id: 'm1', name: 'M1' }],
+  )
+  const pageTree = await loadPage(h)
+  const button = findProbeButton(pageTree)
+  assert.ok(button)
+  button.props.onClick()
+  await sleep(80)
+
+  assert.equal(probeBodies(h.calls).length, 1)
+  assert.equal(applyBodies(h.calls).length, 0, 'a non-2xx /probe response must not be sent to /probe/apply even without an error field')
+
+  h.resetHooks('ReasoningPage')
+  const statsTree = renderStatsPanel(h, h.pageTag(h.pageProps))
+  const cells = probeKeyCells(statsTree)
+  assert.ok(cells.some((text) => text.includes('demo/m1')), 'the 502 row must still render in the results table')
+  const summary = findByClass(statsTree, 'rl-probe-summary')
+  assert.ok(summary, 'a summary must render')
+  assert.ok(textOf(summary).includes('1 个探测失败'), 'failed count must be disclosed — got ' + textOf(summary))
+})
+
+test('(MAINT-047/J) 部分失败：apply 只含成功行，摘要披露失败计数（N2）', async () => {
+  const h = createHarness(
+    () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        probe: [
+          { provider: 'demo', model: 'm1', key: 'demo/m1', reason: 'never-probed' },
+          { provider: 'demo', model: 'm2', key: 'demo/m2', reason: 'never-probed' },
+        ],
+        skip: [],
+        total: 2,
+        force: false,
+      }),
+    }),
+    (init) => {
+      const body = JSON.parse(init.body)
+      if (body.model === 'm2') return Promise.reject(new Error('probe down'))
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ provider: body.provider, model: body.model, key: 'demo/' + body.model, working: ['low'], rejected: [], blocked: [] }),
+      }
+    },
+  )
+  const pageTree = await loadPage(h)
+  const button = findProbeButton(pageTree)
+  assert.ok(button)
+  button.props.onClick()
+  await sleep(80)
+
+  assert.equal(probeBodies(h.calls).length, 2)
+  const applies = applyBodies(h.calls)
+  assert.equal(applies.length, 1, 'apply must still run for the successful row')
+  assert.deepEqual(applies[0].results.map((r) => r.key), ['demo/m1'], 'apply must contain only the successful row')
+
+  h.resetHooks('ReasoningPage')
+  const statsTree = renderStatsPanel(h, h.pageTag(h.pageProps))
+  const summary = findByClass(statsTree, 'rl-probe-summary')
+  assert.ok(summary)
+  const summaryText = textOf(summary)
+  assert.ok(summaryText.includes('探测完成：1 个模型'), 'probeDone model count must be the applicable count — got ' + summaryText)
+  assert.ok(summaryText.includes('1 个探测失败'), 'failed count must be disclosed — got ' + summaryText)
+  assert.ok(summaryText.includes('下次仍会重测'), 'failure note must explain the retry semantics — got ' + summaryText)
+  assert.ok(summary.props.className.includes('rl-status-bad'), 'a run with failures must be flagged as not fully ok')
+})
+
+test('(MAINT-047/K) 计划含目标之外的 key：整份作废回退全量（N4 反向覆盖率校验）', async () => {
+  const h = createHarness(() => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      // targets 全覆盖，但多出一个 demo/ghost → 计划不可信，整份作废
+      probe: [
+        { provider: 'demo', model: 'm1', key: 'demo/m1', reason: 'never-probed' },
+        { provider: 'demo', model: 'm2', key: 'demo/m2', reason: 'never-probed' },
+        { provider: 'demo', model: 'ghost', key: 'demo/ghost', reason: 'never-probed' },
+      ],
+      skip: [],
+      total: 3,
+      force: false,
+    }),
+  }))
+  const pageTree = await loadPage(h)
+  const button = findProbeButton(pageTree)
+  assert.ok(button)
+  button.props.onClick()
+  await sleep(80)
+
+  const measured = probeBodies(h.calls).map((body) => body.provider + '/' + body.model).sort()
+  assert.deepEqual(measured, ['demo/m1', 'demo/m2'], 'out-of-scope plan keys must fall back to full probing without requesting the ghost')
+
+  h.resetHooks('ReasoningPage')
+  const statsTree = renderStatsPanel(h, h.pageTag(h.pageProps))
+  const summary = findByClass(statsTree, 'rl-probe-summary')
+  assert.ok(summary)
+  assert.ok(!textOf(summary).includes('本次增量实测'), 'an out-of-scope plan must not claim incremental semantics')
+})
+
+test('(MAINT-047/L) 空 provider 的组不进探测目标（N3）', async () => {
+  // createApi 的 groups 形状：用一个空 id 的组携带 ghost，再由 demo 组携带 m1
+  const h = createHarness(
+    () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        probe: [{ provider: 'demo', model: 'm1', key: 'demo/m1', reason: 'never-probed' }],
+        skip: [],
+        total: 1,
+        force: false,
+      }),
+    }),
+    undefined,
+    [{ id: 'm1', name: 'M1' }],
+  )
+  // 改写 llm.models 桩追加空 id 组（在 harness 建好之后覆盖 api 方法）
+  h.pageProps.api.llm.models = async () => ({
+    result: {
+      ok: true,
+      value: { groups: [{ id: '', models: [{ id: 'ghost', name: 'Ghost' }] }, { id: 'demo', models: [{ id: 'm1', name: 'M1' }] }] },
+    },
+  })
+  const pageTree = await loadPage(h)
+  const button = findProbeButton(pageTree)
+  assert.ok(button)
+  button.props.onClick()
+  await sleep(80)
+
+  const plans = planBodies(h.calls)
+  assert.equal(plans.length, 1)
+  assert.deepEqual(plans[0].targets, [{ provider: 'demo', model: 'm1' }], 'empty provider must be excluded from probe targets')
+  assert.deepEqual(probeBodies(h.calls).map((body) => body.provider + '/' + body.model), ['demo/m1'], 'only the real target is measured; plan is adopted (no silent full fallback)')
+  h.resetHooks('ReasoningPage')
+  const statsTree = renderStatsPanel(h, h.pageTag(h.pageProps))
+  const summary = findByClass(statsTree, 'rl-probe-summary')
+  assert.ok(summary)
+  assert.ok(textOf(summary).includes('探测完成：1 个模型'), 'plan must be adopted for the single real target — got ' + textOf(summary))
+})

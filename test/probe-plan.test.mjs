@@ -55,12 +55,20 @@ test('probeEntryNeedsProbe：无条目/非普通对象/无任何探测记录 →
   }
 })
 
-test('probeEntryNeedsProbe：error 非空（null/undefined/空串除外）→ probe-error（优先于 blocked/persisted）', () => {
+test('probeEntryNeedsProbe：error 为非空字符串 → probe-error（优先于 blocked/persisted）；MAINT-047 N5 口径=字符串且非空', () => {
   assert.deepEqual(probeEntryNeedsProbe({ working: [], error: 'boom' }), { probe: true, reason: R.PROBE_ERROR })
   assert.deepEqual(
-    probeEntryNeedsProbe({ working: [], error: { code: 'X' }, blocked: ['high'], persisted: 'pending-apply' }),
+    probeEntryNeedsProbe({ working: [], error: 'boom', blocked: ['high'], persisted: 'pending-apply' }),
     { probe: true, reason: R.PROBE_ERROR },
   )
+  // MAINT-047 N5：非字符串 error（对象）不算异常——口径与 /probe/apply 及客户端统一，
+  // 按后续判定走（此处 blocked 非空 → blocked-levels）。
+  assert.deepEqual(
+    probeEntryNeedsProbe({ working: [], error: { code: 'X' }, blocked: ['high'], persisted: 'pending-apply' }),
+    { probe: true, reason: R.BLOCKED_LEVELS },
+  )
+  assert.deepEqual(probeEntryNeedsProbe({ working: [], error: { code: 'X' }, persisted: 'converged' }), { probe: false, reason: R.SETTLED })
+  assert.deepEqual(probeEntryNeedsProbe({ working: [], error: 42, persisted: 'converged' }), { probe: false, reason: R.SETTLED })
   // error 为 null/undefined/空串不算异常（空串若判 probe-error 会让模型永久重测）
   assert.deepEqual(probeEntryNeedsProbe({ working: [], error: null, persisted: 'converged' }), { probe: false, reason: R.SETTLED })
   assert.deepEqual(probeEntryNeedsProbe({ working: [], error: undefined, persisted: 'converged' }), { probe: false, reason: R.SETTLED })
