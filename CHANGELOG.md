@@ -7,7 +7,7 @@
 - **`/probe` 客户端成功判定补 `response.ok`（MAINT-047）**：非 2xx 响应即使 body 无 `error` 字段也不进入固化（对称防御；当前服务端非 2xx JSON 恒带 `error`，此前不可达）。
 - **`probeTargets` 过滤空 `group.id`（MAINT-047）**：避免目录出现空 provider 时让计划覆盖率校验静默永久回退全量探测。
 - **计划覆盖率补反向校验（MAINT-047）**：服务端计划若含目标之外的 key，整份作废回退全量（此前只校验 targets ⊆ covered）。
-- **`error` 判定口径三处统一（MAINT-047）**：`planProbe` 与 apply/客户端一致，只认「字符串且非空」——非字符串 `error` 不再触发 `probe-error`。
+- **`error` 判定口径四处统一（MAINT-046/047）**：`planProbe`、`/probe` 路由、`/probe/apply` 与客户端一致，只认「字符串且非空」——非字符串 `error` 不再触发 `probe-error`。
 - `contractHealth.peers` 投影改浅拷贝，与 `agentSelection` 一致（MAINT-045）。
 
 ### Changed
@@ -16,7 +16,7 @@
 ### Notes
 - 版本 0.11.0 → 0.11.1（PATCH）。配置 schema 无变更；无数据迁移。
 - 安装或更新后请**完全退出并重开 DSH**。
-- 质量依据：主树 `node --test` **327/327**；`client-smoke` OK；`npm pack` 13 files；独立 Code Reviewer 回执见治理记录。
+- 质量依据：主树 `node --test` **327/327**；`client-smoke` OK；`host:doctor` 13/13 PASS DRIFT=0；`npm pack` 13 files；独立审查：Code Reviewer R0 三任务（MAINT-046/047/045）**APPROVED_WITH_NOTES/0**；Release Reviewer R0 **APPROVED_WITH_NOTES/0**。
 
 ## 0.11.0 (2026-11-23)
 

@@ -96,7 +96,7 @@
     v0.11.1（MAINT-046）：`/probe` 路由对带非空 `error` 的结果（如「无候选档位」）
     同样不写 `lastProbe`；客户端 `/probe` 成功判定要求 `response.ok`；计划覆盖率
     双向校验（targets ⊆ covered 且 covered ⊆ targets），不符整份作废回退全量；
-    `error` 判定三处统一为「字符串且非空」。
+    `error` 判定四处统一为「字符串且非空」（planProbe / `/probe` 路由 / `/probe/apply` / 客户端）。
   - 固化写走既有 `settings.replace` 整节替换 + `settings/updated` 收敛路径，
     不新增写面。
 - 安装器（install.ps1 / install.sh）：清理旧残留（只删链接本体）、安装前
