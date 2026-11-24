@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.1 (2026-11-24)
+
+### Fixed
+- **`/probe` 路由不再把失败结果写进 `lastProbe`（MAINT-046）**：「无候选档位」等带 `error` 的探测结果此前仍会落盘为 `pending-apply`，把已 `converged` 的模型降级为「待固化」——现在与 `/probe/apply` 同口径，带非空 `error` 的结果不写 `lastProbe`，原定论保持不变。
+- **`/probe` 客户端成功判定补 `response.ok`（MAINT-047）**：非 2xx 响应即使 body 无 `error` 字段也不进入固化（对称防御；当前服务端非 2xx JSON 恒带 `error`，此前不可达）。
+- **`probeTargets` 过滤空 `group.id`（MAINT-047）**：避免目录出现空 provider 时让计划覆盖率校验静默永久回退全量探测。
+- **计划覆盖率补反向校验（MAINT-047）**：服务端计划若含目标之外的 key，整份作废回退全量（此前只校验 targets ⊆ covered）。
+- **`error` 判定口径三处统一（MAINT-047）**：`planProbe` 与 apply/客户端一致，只认「字符串且非空」——非字符串 `error` 不再触发 `probe-error`。
+- `contractHealth.peers` 投影改浅拷贝，与 `agentSelection` 一致（MAINT-045）。
+
+### Changed
+- 探测摘要追加失败计数：「（N 个探测失败，未写回——下次仍会重测）」，让「实测 X/Y」与「写回 N 处」口径可对账（MAINT-047）。
+
+### Notes
+- 版本 0.11.0 → 0.11.1（PATCH）。配置 schema 无变更；无数据迁移。
+- 安装或更新后请**完全退出并重开 DSH**。
+- 质量依据：主树 `node --test` **327/327**；`client-smoke` OK；`npm pack` 13 files；独立 Code Reviewer 回执见治理记录。
+
 ## 0.11.0 (2026-11-23)
 
 ### Added

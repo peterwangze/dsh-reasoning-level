@@ -1,4 +1,4 @@
-# dsh-reasoning-level 验证协议（v0.11.0）
+# dsh-reasoning-level 验证协议（v0.11.1）
 
 > 本文是「插件不得拖垮宿主」的工程契约：从一次真实事故复盘出发，给出
 > **架构约束（为什么）、实现规约（怎么防）、验证流程（怎么证）** 三层防线。
@@ -93,6 +93,10 @@
     → 回退全量。**失败探测行（fetch reject 或响应带 `error`）不进入 `/probe/apply`**，
     服务端同样跳过带 `error` 的结果行——不改写声明、不改写 `lastProbe`，该模型下次
     仍判需重测（R0 P1 教训：一次超时曾把待固化模型固化为 `skipped:*` 定论）。
+    v0.11.1（MAINT-046）：`/probe` 路由对带非空 `error` 的结果（如「无候选档位」）
+    同样不写 `lastProbe`；客户端 `/probe` 成功判定要求 `response.ok`；计划覆盖率
+    双向校验（targets ⊆ covered 且 covered ⊆ targets），不符整份作废回退全量；
+    `error` 判定三处统一为「字符串且非空」。
   - 固化写走既有 `settings.replace` 整节替换 + `settings/updated` 收敛路径，
     不新增写面。
 - 安装器（install.ps1 / install.sh）：清理旧残留（只删链接本体）、安装前

@@ -2,7 +2,7 @@
 
 > DeepSeek Harness（DSH）统一模型管理插件：**一个设置页管理所有模型的思考强度、多模态能力与采样参数**——含全局默认、预设、模型级覆盖与实时调用观测。
 
-[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.11.0-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
+[![dsh-plugin](https://img.shields.io/badge/DSH-plugin-blue)](https://github.com/peterwangze) [![version](https://img.shields.io/badge/version-0.11.1-green)](./package.json) [![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#一键安装)
 
 ---
 
